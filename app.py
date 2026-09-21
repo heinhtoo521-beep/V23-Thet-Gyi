@@ -1,11 +1,11 @@
 """
 V23.1 LIVE TRADING BOT
 =======================
-V23.1 Strategy Engine + V20.6.2 Infrastructure
-- Real-time API polling (6lottery)
-- Telegram signals (24/7)
+V23.1 Strategy Engine + Live Infrastructure
+- Real-time API polling
+- Telegram signals (WIN only)
 - Level betting (1-15)
-- Flask health endpoints (HF Spaces compatible)
+- Flask health endpoints (Render compatible)
 """
 
 from __future__ import annotations
@@ -931,15 +931,12 @@ class BetProgressionSimulator:
     def metrics(self):
         h = self.history
         n = len(h)
-        dangerous = sum(1 for i in range(max(0, n - 6)) if h[i:i+7] == [1,0,0,0,0,0,1])
-        recovery = sum(1 for i in range(max(0, n - 7)) if h[i:i+7] == [1,0,0,0,0,1,1])
         return {
             "n": n, "current_state": self.state,
             "current_level": self.level, "current_stage": self.stage,
             "cycles_completed": self.cycles_completed,
             "total_wins": self.total_wins, "total_losses": self.total_losses,
-            "peak_level": self.peak_level, "recovery_wins": self.recovery_wins,
-            "failed_recoveries": self.failed_recoveries,
+            "peak_level": self.peak_level,
             **self.risk(),
         }
 
@@ -1064,9 +1061,6 @@ class PredictionEngineV23:
             prog_shrink = 1.0 - 0.45 * prog["progression_risk"]
             p_final = clamp(0.5 + (p_final - 0.5) * max(0.30, prog_shrink))
             seqscore["progression_risk"] = prog["progression_risk"]
-            seqscore["progression_score"] = 1.0 - prog["progression_risk"]
-            seqscore["progression_level"] = float(self.progression.level)
-            seqscore["progression_stage"] = float(self.progression.stage)
 
             cp = self.change_guard.score(list(self.history))
             confidence = clamp(base_conf * (1.0 - 0.35 * cp))
@@ -1273,19 +1267,25 @@ class V23LiveBot:
             self.last_digit = digit
             self.candle_db.add(digit, period=period)
 
+            # ═══════════════════════════════════════════════════
+            #  WARMUP
+            # ═══════════════════════════════════════════════════
             if is_warmup:
                 self.engine.history.append(actual_i)
                 if len(self.engine.history) >= CONFIG["warmup_target"]:
                     self.is_warmup = False
                     notifications.append(
-                        f"Warmup Complete\nHistory: {len(self.engine.history)}\nLive trading starting..."
-                    )
-                else:
-                    notifications.append(
-                        f"Warmup {len(self.engine.history)}/{CONFIG['warmup_target']}"
+                        f"╭━━━━━━━━━━━━━━━━━╮\n"
+                        f"┃ ✅ WARMUP DONE\n"
+                        f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+                        f"📊 History: {len(self.engine.history)}\n"
+                        f"🚀 Live trading starting..."
                     )
                 return notifications
 
+            # ═══════════════════════════════════════════════════
+            #  SETTLE PREVIOUS PREDICTION
+            # ═══════════════════════════════════════════════════
             if self.active_prediction is not None:
                 correct = self.engine.resolve_last(result)
                 won = bool(correct)
@@ -1293,40 +1293,45 @@ class V23LiveBot:
                 profit = settle["profit"]
                 action = settle["action"]
 
+                # WIN ONLY — Loss message မထည့်
                 if won:
                     if action == "RESET":
                         notifications.append(
-                            f"WIN (+{profit:,.0f})\n"
-                            f"BET2 WIN -> RESET\n"
-                            f"Level {settle['old_level']} -> 1\n"
-                            f"Profit: {self.betting.current_profit:+,.0f}\n"
-                            f"WR: {self.betting.get_wr():.1f}%"
+                            f"╭━━━━━━━━━━━━━━━━━╮\n"
+                            f"┃   🎉 RESET         ┃\n"
+                            f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+                            f"💰 +{profit:,.0f}\n\n"
+                            f"▸ BET2 WIN → Level 1 RESET\n"
+                            f"▸ Cycle Complete\n"
+                            f"▸ Profit: {self.betting.current_profit:+,.0f}\n"
+                            f"▸ WR: {self.betting.get_wr():.1f}%"
                         )
                     else:
                         notifications.append(
-                            f"WIN (+{profit:,.0f})\n"
-                            f"BET1 WIN -> BET2 wait\n"
-                            f"Level: {self.betting.level} | BET2\n"
-                            f"Profit: {self.betting.current_profit:+,.0f}"
+                            f"╭━━━━━━━━━━━━━━━━━╮\n"
+                            f"┃   🔥 WIN ✅        ┃\n"
+                            f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+                            f"💰 +{profit:,.0f}\n\n"
+                            f"▸ BET1 WIN → BET2 စောင့်\n"
+                            f"▸ Level: {self.betting.level} | BET2\n"
+                            f"▸ Profit: {self.betting.current_profit:+,.0f}\n"
+                            f"▸ WR: {self.betting.get_wr():.1f}%"
                         )
-                else:
-                    notifications.append(
-                        f"LOSS ({profit:,.0f})\n"
-                        f"Level {settle['old_level']} -> {settle['new_level']}\n"
-                        f"Next Bet1: {get_level_bet(self.betting.level)['bet1']:,}\n"
-                        f"Profit: {self.betting.current_profit:+,.0f}"
-                    )
+
+                # LOSS — message မထည့် (silent)
 
                 reset = self.betting.check_profit_reset()
                 if reset:
                     notifications.append(
-                        f"PROFIT RESET!\n\n"
-                        f"Net: +{reset['net_profit']:,.0f}\n"
-                        f"Profit: +{reset['total_profit']:,.0f}\n"
-                        f"Loss: -{reset['total_loss']:,.0f}\n"
-                        f"Max DD: {reset['max_dd']:,.0f}\n"
-                        f"Max Level: {reset['max_level']}\n"
-                        f"Reset -> Level 1"
+                        f"╭━━━━━━━━━━━━━━━━━╮\n"
+                        f"┃  💎 PROFIT RESET\n"
+                        f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+                        f"💰 Net: +{reset['net_profit']:,.0f}\n"
+                        f"📈 Total Profit: +{reset['total_profit']:,.0f}\n"
+                        f"📉 Total Loss: -{reset['total_loss']:,.0f}\n"
+                        f"🔻 Max DD: {reset['max_dd']:,.0f}\n"
+                        f"🏆 Max Level: {reset['max_level']}\n"
+                        f"🔄 Reset → Level 1"
                     )
 
                 self.active_prediction = None
@@ -1334,43 +1339,55 @@ class V23LiveBot:
             else:
                 self.engine.history.append(actual_i)
 
+            # ═══════════════════════════════════════════════════
+            #  NEW PREDICTION
+            # ═══════════════════════════════════════════════════
             self.engine.predict(round_id=period)
             pred = self.engine.last_prediction
             self.current_regime = self.engine.regime.classify(
                 self.engine._history_features()
             )
 
+            # ⚠️ NEXT PERIOD = Current + 1
+            try:
+                next_period = str(int(period) + 1)[-3:]
+            except Exception:
+                next_period = period[-3:]
+
             quality = pred.quality
             min_q = CONFIG["min_quality_for_signal"]
             quality_order = {"A": 4, "B": 3, "C": 2, "D": 1}
 
+            # SKIP
             if quality_order.get(quality, 0) < quality_order.get(min_q, 2):
                 notifications.append(
-                    f"Period {period[-3:]}\n"
-                    f"SKIP (Quality {quality})\n"
-                    f"{pred.signal} @ {pred.confidence:.1%}"
+                    f"💤 SKIP | Period {next_period}\n"
+                    f"▸ Confidence: {pred.confidence:.1%}"
                 )
+
+            # SIGNAL
             else:
                 bet_amount, bet_type = self.betting.get_current_bet()
                 self.active_prediction = pred
                 self.betting.total_signals += 1
 
                 notifications.append(
-                    f"Period {period[-3:]}\n"
-                    f"SIGNAL -> {pred.signal.upper()}\n"
-                    f"Conf: {pred.confidence:.1%}\n"
-                    f"Quality: {quality}\n"
-                    f"Regime: {self.current_regime}\n"
-                    f"---\n"
-                    f"Bot Step: {self.betting.bot_step}x\n"
-                    f"Level: {self.betting.level} | {bet_type}\n"
-                    f"Bet: {bet_amount:,}\n"
-                    f"---\n"
-                    f"Max Lv: {self.betting.max_level_reached}\n"
-                    f"Max DD: {self.betting.max_loss_amount:,.0f}\n"
-                    f"Profit: {self.betting.current_profit:+,.0f}\n"
-                    f"WR: {self.betting.get_wr():.1f}%\n"
-                    f"Last: {digit} ({COLOUR_MAP.get(digit, '?')})"
+                    f"╭━━━━━━━━━━━━━━━━━╮\n"
+                    f"┃ 🎯 V23 SIGNAL\n"
+                    f"╰━━━━━━━━━━━━━━━━━╯\n\n"
+                    f"📅 Period: {next_period}\n"
+                    f"🎲 Predict: {pred.signal.upper()}\n"
+                    f"📊 Confidence: {pred.confidence:.1%}\n"
+                    f"⭐ Quality: {quality}\n"
+                    f"🧠 Regime: {self.current_regime}\n\n"
+                    f"╭─ 💰 BETTING ─╮\n"
+                    f"🎮 Level: {self.betting.level} | {bet_type}\n"
+                    f"💵 Bet: {bet_amount:,}\n"
+                    f"🤖 Step: {self.betting.bot_step}x\n\n"
+                    f"📈 Stats:\n"
+                    f"├─ WR: {self.betting.get_wr():.1f}%\n"
+                    f"├─ Profit: {self.betting.current_profit:+,.0f}\n"
+                    f"└─ Max DD: {self.betting.max_loss_amount:,.0f}"
                 )
 
             return notifications
