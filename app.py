@@ -1,10 +1,11 @@
 """
-V400 — FINAL FIXED API PAYLOAD & HEADERS SCRIPT
-================================================
+V400 — FINAL PRODUCTION STABLE SCRIPT (NO 429 ERROR)
+=====================================================
 - Features:
-  * Fixed payload and headers matching the working API structure.
-  * Correct typeId, random, and signature integration.
-  * Clean Skip / Wait notifications, No loss messages, and Max Level/DD tracking.
+  * Single-item latest period polling (prevents log/telegram message flooding).
+  * Telegram rate limit protection (smooth intervals between dispatches).
+  * Skip/Wait notifications, Silent Loss handling, Max Level & Max DD tracking.
+  * +100,000 Profit Milestone Auto-Reset.
 """
 
 from __future__ import annotations
@@ -260,7 +261,7 @@ class V400LiveBot:
         payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
         try:
             res = requests.post(url, json=payload, timeout=6)
-            print(f"[TG-RES] Status: {res.status_code}, Body: {res.text}", flush=True)
+            print(f"[TG-RES] Status: {res.status_code}", flush=True)
         except Exception as e:
             print(f"[TG-ERR] {e}", flush=True)
 
@@ -351,18 +352,18 @@ class V400LiveBot:
                         "timestamp": int(time.time()),
                     }
                     res = requests.post(CONFIG["api_url"], json=payload, headers=headers, timeout=5)
-                    print(f"[API-RES] Status: {res.status_code}, Body: {res.text[:150]}", flush=True)
                     if res.status_code == 200:
                         data = res.json()
                         list_data = data.get("data", {}).get("list", [])
                         if list_data:
-                            sorted_data = sorted(list_data, key=lambda x: int(x.get("issueNumber", 0)))
-                            for latest in sorted_data:
-                                period = str(latest.get("issueNumber"))
-                                digit = int(latest.get("number"))
-                                if period != self.last_processed_period:
-                                    self.last_processed_period = period
-                                    self.process_round(period, digit)
+                            # ယူဆချက် - အသစ်ဆုံး ပွဲစဉ် တစ်ခုတည်းကိုသာ ယူရန်
+                            latest = list_data[0]
+                            period = str(latest.get("issueNumber"))
+                            digit = int(latest.get("number"))
+                            if period != self.last_processed_period:
+                                self.last_processed_period = period
+                                self.process_round(period, digit)
+                                time.sleep(1.5) # 429 Error ကာကွယ်ရန်
                 except Exception as e:
                     print(f"[Polling Error] {e}", flush=True)
                 time.sleep(CONFIG["poll_interval"])
@@ -375,7 +376,7 @@ GLOBAL_BOT: Optional[V400LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V400 Final Fixed Telegram Engine Active!", 200
+    return "V400 Production Engine Active!", 200
 
 @app.route("/health")
 def health():
