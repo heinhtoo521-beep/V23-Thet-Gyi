@@ -1,9 +1,10 @@
 """
-V400 — DEBUG-LOGGING AUTO-POLLING TELEGRAM SCRIPT
-===================================================
+V400 — FINAL FIXED API PAYLOAD & HEADERS SCRIPT
+================================================
 - Features:
-  * Adds print statements for API response status and text to Render logs.
-  * Helps trace why messages might not be triggering.
+  * Fixed payload and headers matching the working API structure.
+  * Correct typeId, random, and signature integration.
+  * Clean Skip / Wait notifications, No loss messages, and Max Level/DD tracking.
 """
 
 from __future__ import annotations
@@ -333,22 +334,35 @@ class V400LiveBot:
     def start_polling_loop(self):
         def worker():
             print("[V400] Polling worker started...", flush=True)
-            headers = {"Authorization": LOTTERY_AUTH, "Content-Type": "application/json"}
+            headers = {
+                "accept": "application/json, text/plain, */*",
+                "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
+                "content-type": "application/json;charset=UTF-8",
+                "origin": "https://6win598.com",
+                "referer": "https://6win598.com/",
+                "user-agent": "Mozilla/5.0",
+            }
             while True:
                 try:
-                    payload = {"pageSize": 10, "pageNo": 1, "typeId": 1}
+                    payload = {
+                        "pageSize": 10, "pageNo": 1, "typeId": 30, "language": 7,
+                        "random": "036263f367384d418be07465793c8da8",
+                        "signature": "55F4FD150F15F090B943374F3C9BE78B",
+                        "timestamp": int(time.time()),
+                    }
                     res = requests.post(CONFIG["api_url"], json=payload, headers=headers, timeout=5)
                     print(f"[API-RES] Status: {res.status_code}, Body: {res.text[:150]}", flush=True)
                     if res.status_code == 200:
                         data = res.json()
                         list_data = data.get("data", {}).get("list", [])
                         if list_data:
-                            latest = list_data[0]
-                            period = str(latest.get("issueNumber"))
-                            digit = int(latest.get("number"))
-                            if period != self.last_processed_period:
-                                self.last_processed_period = period
-                                self.process_round(period, digit)
+                            sorted_data = sorted(list_data, key=lambda x: int(x.get("issueNumber", 0)))
+                            for latest in sorted_data:
+                                period = str(latest.get("issueNumber"))
+                                digit = int(latest.get("number"))
+                                if period != self.last_processed_period:
+                                    self.last_processed_period = period
+                                    self.process_round(period, digit)
                 except Exception as e:
                     print(f"[Polling Error] {e}", flush=True)
                 time.sleep(CONFIG["poll_interval"])
@@ -361,7 +375,7 @@ GLOBAL_BOT: Optional[V400LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V400 Debug-Polling Telegram Engine Active!", 200
+    return "V400 Final Fixed Telegram Engine Active!", 200
 
 @app.route("/health")
 def health():
