@@ -1,11 +1,11 @@
 """
-V52.0 — APEX-CHRONO QUANTUM SINGULARITY (Period +1 & Clean Signal-Win Flow)
-===========================================================================
-- Signal Period is ALWAYS API Issue Number + 1 (e.g., API 611 -> Signal 612)
-- LEVEL UP messages completely removed.
-- Loss is 100% silent (No message sent on loss, proceeds straight to next signal).
-- Clean Flow: Signal Message -> (If Won) Win Message -> Next Signal Message.
-- Maintained: Penta-Band Nexus, Max Level 3 Lockdown, Free-Flow Scaling.
+V52.1 — APEX-CHRONO QUANTUM SINGULARITY (Strict Message Sequence Edition)
+=========================================================================
+- Fixed Message Ordering: WIN message is GUARANTEED to appear BEFORE next Signal.
+- Removed background race conditions using a Synchronous Serial Queue.
+- Signal Period is ALWAYS API Issue Number + 1.
+- LEVEL UP messages completely removed (Silent on loss).
+- Flow: Period 015 Signal -> Period 015 WIN -> Period 016 Signal.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ import time
 import os
 import requests
 import threading
-from collections import deque, defaultdict
+from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Tuple
 from flask import Flask, jsonify
 
 # ══════════════════════════════════════════════════════════
@@ -84,7 +84,6 @@ class BettingManager:
         self.max_loss_amount = 0.0
         self.max_level_reached = 1
         self.cycles_completed = 0
-        self.profit_resets = 0
         self.cooldown_rounds = 0
 
     def get_current_bet(self):
@@ -154,7 +153,7 @@ class BettingManager:
         }
 
 # ══════════════════════════════════════════════════════════
-#  V52.0 PENTA-BAND NEXUS ENGINE
+#  PENTA-BAND NEXUS PREDICTION ENGINE
 # ══════════════════════════════════════════════════════════
 @dataclass
 class V36Decision:
@@ -206,7 +205,6 @@ class PredictionEngineV36:
         run_len, run_val = self._get_streaks()
         alt_len = self._get_alternations()
 
-        # 1. BAND-A: Fast Micro-Drift (Recent 6 Rounds)
         recent_6 = h[-6:]
         decay_sum, weight_sum = 0.0, 0.0
         n = len(recent_6)
@@ -216,7 +214,6 @@ class PredictionEngineV36:
             weight_sum += w
         p_band_a = decay_sum / weight_sum if weight_sum > 0 else 0.5
 
-        # 2. BAND-B: Local Symmetry Transition
         k2_count = [0, 0]
         if len(h) >= 3:
             k2 = (h[-2], last)
@@ -225,20 +222,16 @@ class PredictionEngineV36:
                     k2_count[h[i+2]] += 1
         p_band_b = (k2_count[1] + 1.0) / (sum(k2_count) + 2.0)
 
-        # 3. BAND-C: Harmonic Balance Oscillator (Window 12)
         recent_12 = sum(h[-12:]) / 12.0
         p_band_c = 1.0 - recent_12
 
-        # 4. BAND-D: Dual-Chop Anti-Trap Engine
         is_alternating = (len(h) >= 2 and h[-1] != h[-2])
         p_band_d = (1.0 - last) if is_alternating else last
 
-        # 5. BAND-E: Micro-Regime Momentum Index
         recent_4 = h[-4:]
         diff = sum(recent_4) / 4.0
         p_band_e = 0.70 if diff >= 0.75 else (0.30 if diff <= 0.25 else 0.50)
 
-        # Cooldown Override Logic (Level 3+ Only)
         golden_override = False
         if cooldown > 0:
             if run_len >= 2 or alt_len >= 2:
@@ -246,9 +239,6 @@ class PredictionEngineV36:
             else:
                 return V36Decision("WAIT", "Big", 0.50, f"COOLDOWN_{cooldown}", current_level)
 
-        # ══════════════════════════════════════════════════════════
-        # 6. BET 2 HYPER-LOCK 8.0 (Win-Win Priority Boost)
-        # ══════════════════════════════════════════════════════════
         if current_state == "WAITING_BET2":
             if run_len >= 2:
                 side = "Big" if run_val == 1 else "Small"
@@ -267,9 +257,6 @@ class PredictionEngineV36:
                 conf = 0.91
                 return V36Decision("BET", side, conf, mode, current_level)
 
-        # ══════════════════════════════════════════════════════════
-        # 7. BET 1 PENTA-BAND NEXUS
-        # ══════════════════════════════════════════════════════════
         p_final = (0.35 * p_band_a) + (0.30 * p_band_b) + (0.15 * p_band_c) + (0.10 * p_band_d) + (0.10 * p_band_e)
         side = "Big" if p_final >= 0.50 else "Small"
         deviation = abs(p_final - 0.50)
@@ -311,7 +298,7 @@ class PredictionEngineV36:
         return V36Decision("BET", side, conf, mode, current_level)
 
 # ══════════════════════════════════════════════════════════
-#  LIVE BOT & TELEGRAM DISPATCHER (CLEAN FLOW)
+#  LIVE BOT & SYNCHRONOUS TELEGRAM SENDER
 # ══════════════════════════════════════════════════════════
 class V36LiveBot:
     def __init__(self):
@@ -320,64 +307,68 @@ class V36LiveBot:
         self.betting = BettingManager()
         self.last_decision: Optional[V36Decision] = None
 
-    def send_telegram(self, message: str):
+    def send_telegram_sync(self, message: str):
+        """အစီအစဉ်မလွဲချော်စေရန် တိုက်ရိုက်ပို့ဆောင်သော Synchronous Method"""
         if not TELEGRAM_TOKEN or not CHAT_ID:
             print(f"[TG-LOCAL]\n{message}", flush=True)
             return
 
-        def _send():
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
-            for _ in range(3):
-                try:
-                    res = requests.post(url, json=payload, timeout=8)
-                    if res.status_code == 200:
-                        break
-                except Exception:
-                    time.sleep(1)
-
-        threading.Thread(target=_send, daemon=True).start()
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+        for _ in range(3):
+            try:
+                res = requests.post(url, json=payload, timeout=6)
+                if res.status_code == 200:
+                    break
+            except Exception:
+                time.sleep(0.5)
 
     def process_round(self, period: str, digit: int):
         with self.lock:
             actual_big = 1 if digit >= 5 else 0
 
-            # 1. Resolve Previous Round
+            # ══════════════════════════════════════════════════════════
+            # 1. RESOLVE PREVIOUS ROUND (WIN MESSAGE ကို အရင်ပို့ခြင်း)
+            # ══════════════════════════════════════════════════════════
             if self.last_decision and self.last_decision.action == "BET":
                 won = (1 if self.last_decision.signal == "Big" else 0) == actual_big
                 settle = self.betting.apply_result(won)
 
                 if won:
-                    # နိုင်သွားပါက WIN message သီးသန့် ပို့မည်
                     if settle['action'] == 'RESET':
-                        msg = (
+                        win_msg = (
                             f"🔥 WIN ✅ (+{settle['profit']:,.0f})\n"
                             f"🎉 BET2 WIN → Level 1 RESET\n"
                             f"🔄 Level {settle['old_level']} → Level 1\n"
                             f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
                             f"📊 WR: {self.betting.get_wr():.1f}%"
                         )
-                        self.send_telegram(msg)
                     else:
-                        msg = (
+                        win_msg = (
                             f"🔥 WIN ✅ (+{settle['profit']:,.0f})\n"
                             f"🎯 Bet1 Win → Bet2 စောင့်\n"
                             f"🎮 Level: {self.betting.level} | BET2\n"
                             f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
                             f"📊 WR: {self.betting.get_wr():.1f}%"
                         )
-                        self.send_telegram(msg)
+                    # Win message ကို အရင် ရောက်အောင်ပို့ပြီး အနည်းငယ် စောင့်သည်
+                    self.send_telegram_sync(win_msg)
+                    time.sleep(0.3)
                 else:
-                    # Loss ဖြစ်ပါက LEVEL UP message လုံးဝမပို့ဘဲ တိတ်ဆိတ်စွာ ကျော်မည်
+                    # Loss ဖြစ်ပါက တိတ်ဆိတ်စွာ ကျော်သည်
                     pass
 
-            # 2. Update Knowledge Base
+            # ══════════════════════════════════════════════════════════
+            # 2. UPDATE KNOWLEDGE BASE
+            # ══════════════════════════════════════════════════════════
             self.engine.resolve(actual_big)
 
             if len(self.engine.history) < CONFIG["warmup_target"]:
                 return
 
-            # 3. Next Prediction with Penta-Band Nexus
+            # ══════════════════════════════════════════════════════════
+            # 3. NEXT PREDICTION & SIGNAL SENDING
+            # ══════════════════════════════════════════════════════════
             decision = self.engine.predict(
                 current_level=self.betting.level,
                 current_state=self.betting.level_state,
@@ -396,18 +387,14 @@ class V36LiveBot:
             bet_amt, b_type = self.betting.get_current_bet()
             self.betting.total_signals += 1
 
-            # ══════════════════════════════════════════════════════════
-            # SIGNAL PERIOD INCREMENT (+1 RULE)
-            # ══════════════════════════════════════════════════════════
+            # API Period + 1 Logic
             try:
-                # API မှ ရောက်လာသော period နံပါတ်ကို 1 ပေါင်းပြီး နောက်ဆုံး ၃ လုံး ယူသည်
                 current_num = int(period)
                 next_period_num = current_num + 1
                 period_str = str(next_period_num)[-3:]
             except Exception:
                 period_str = str(period)[-3:]
 
-            # Telegram Signal Template
             sig_msg = (
                 f"💖 Period {period_str}\n"
                 f"🎯 SIGNAL → {decision.signal.upper()}\n"
@@ -422,7 +409,8 @@ class V36LiveBot:
                 f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
                 f"📊 WR: {self.betting.get_wr():.1f}%"
             )
-            self.send_telegram(sig_msg)
+            # အရင်ပွဲ၏ WIN Message ရောက်ပြီးမှသာ Signal Message အသစ်ကို ပို့ဆောင်သည်
+            self.send_telegram_sync(sig_msg)
 
 # ══════════════════════════════════════════════════════════
 #  TELEGRAM COMMANDS LISTENER
@@ -447,7 +435,7 @@ def poll_telegram_commands(bot: V36LiveBot):
                         b = bot.betting
                         bet_amt, b_type = b.get_current_bet()
                         if text == "/status":
-                            bot.send_telegram(
+                            bot.send_telegram_sync(
                                 f"📊 <b>STATUS UPDATE</b>\n\n"
                                 f"• Level: <b>{b.level} ({b.level_state})</b>\n"
                                 f"• Bet: <b>{bet_amt:,} ({b_type})</b>\n"
@@ -457,7 +445,7 @@ def poll_telegram_commands(bot: V36LiveBot):
                             )
                         elif text == "/reset":
                             b.reset_all()
-                            bot.send_telegram("🔄 Level 1 သို့ ပြန်လည် Reset ချပြီးပါပြီ။")
+                            bot.send_telegram_sync("🔄 Level 1 သို့ ပြန်လည် Reset ချပြီးပါပြီ။")
         except Exception:
             time.sleep(2)
         time.sleep(1)
@@ -522,7 +510,7 @@ GLOBAL_BOT: Optional[V36LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V52.0 APEX-CHRONO Clean Flow Live!", 200
+    return "V52.1 APEX-CHRONO Strict Sequence Live!", 200
 
 @app.route("/health")
 def health():
