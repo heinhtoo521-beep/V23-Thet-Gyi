@@ -1,9 +1,9 @@
 """
-V400 — AUTO-POLLING BACKGROUND WORKER TELEGRAM SCRIPT
-======================================================
+V400 — DEBUG-LOGGING AUTO-POLLING TELEGRAM SCRIPT
+===================================================
 - Features:
-  * Runs 6lottery API Polling automatically in a background daemon thread.
-  * Ensures Telegram messages are sent out even without external web traffic.
+  * Adds print statements for API response status and text to Render logs.
+  * Helps trace why messages might not be triggering.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ CONFIG = {
     "api_url": "https://6lotteryapi.com/api/webapi/GetNoaverageEmerdList",
     "payout_rate": 0.96,
     "profit_reset_threshold": 100000,
-    "poll_interval": 2.0,
+    "poll_interval": 3.0,
     "warmup_target": 15,
 }
 
@@ -258,9 +258,10 @@ class V400LiveBot:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
         try:
-            requests.post(url, json=payload, timeout=6)
-        except Exception:
-            pass
+            res = requests.post(url, json=payload, timeout=6)
+            print(f"[TG-RES] Status: {res.status_code}, Body: {res.text}", flush=True)
+        except Exception as e:
+            print(f"[TG-ERR] {e}", flush=True)
 
     def process_round(self, period: str, digit: int):
         with self.lock:
@@ -337,6 +338,7 @@ class V400LiveBot:
                 try:
                     payload = {"pageSize": 10, "pageNo": 1, "typeId": 1}
                     res = requests.post(CONFIG["api_url"], json=payload, headers=headers, timeout=5)
+                    print(f"[API-RES] Status: {res.status_code}, Body: {res.text[:150]}", flush=True)
                     if res.status_code == 200:
                         data = res.json()
                         list_data = data.get("data", {}).get("list", [])
@@ -359,7 +361,7 @@ GLOBAL_BOT: Optional[V400LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V400 Auto-Polling Telegram Engine Active!", 200
+    return "V400 Debug-Polling Telegram Engine Active!", 200
 
 @app.route("/health")
 def health():
