@@ -1,13 +1,11 @@
 """
-V36.0 — APEX-SINGULARITY KERNEL (Ultra Pro High-Performance Engine)
-===================================================================
-STRICT RULES PRESERVED:
+V36.0 — APEX-SINGULARITY KERNEL (Render Production Ready)
+=========================================================
+Strict Rules Preserved:
   ✓ RETAINED: No Level Cap (Unlimited Martingale/Fibonacci)
   ✓ RETAINED: Exact Original Bet Sizing Table & Structure
-  ✓ RETAINED: 100% Signal Frequency (Every round bets, no skip)
-  ✓ UPGRADED: Zero-Latency Dynamic Phase Synchronizer
-  ✓ UPGRADED: Level 4+ Antifragile Cycle-Breaker (Sub-Level 7 Target)
-  ✓ UPGRADED: Conditional Micro-Entropy Lock for Bet 2 Rapid Reset
+  ✓ RETAINED: 100% Signal Frequency (Round တိုင်း Signal အမြဲထွက်သည်)
+  ✓ FIX: Flask Web Server Bind to 0.0.0.0 for Render Port Health Check
 """
 
 from __future__ import annotations
@@ -15,9 +13,11 @@ import math
 import time
 import os
 import requests
+import threading
 from collections import deque, defaultdict
 from dataclasses import dataclass
 from typing import Optional, Dict, List
+from flask import Flask, jsonify
 
 # ══════════════════════════════════════════════════════════
 #  CREDENTIALS & CONFIG
@@ -26,24 +26,30 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
 LOTTERY_AUTH = os.environ.get("LOTTERY_AUTH", "")
 
+COLOUR_MAP = {
+    0: "Violet+Red", 1: "Green", 2: "Red", 3: "Green", 4: "Red",
+    5: "Violet+Green", 6: "Red", 7: "Green", 8: "Red", 9: "Green",
+}
+
 CONFIG = {
     "api_url": "https://6lotteryapi.com/api/webapi/GetNoaverageEmerdList",
     "payout_rate": 0.96,
     "profit_reset_threshold": 100000,
-    "warmup_target": 20,
+    "poll_interval": 2.0,
+    "warmup_target": 15,
 }
 
 # မူရင်း Bet Structure အတိုင်း လုံးဝမပြောင်းလဲပါ
 LEVEL_TABLE = {
-    1: {"bet1": 1000, "bet2": 2000},
-    2: {"bet1": 1000, "bet2": 2000},
-    3: {"bet1": 2000, "bet2": 4000},
-    4: {"bet1": 2000, "bet2": 4000},
-    5: {"bet1": 3000, "bet2": 6000},
-    6: {"bet1": 4000, "bet2": 8000},
-    7: {"bet1": 6000, "bet2": 12000},
-    8: {"bet1": 8000, "bet2": 16000},
-    9: {"bet1": 10000, "bet2": 20000},
+    1:  {"bet1": 1000,  "bet2": 2000},
+    2:  {"bet1": 1000,  "bet2": 2000},
+    3:  {"bet1": 2000,  "bet2": 4000},
+    4:  {"bet1": 2000,  "bet2": 4000},
+    5:  {"bet1": 3000,  "bet2": 6000},
+    6:  {"bet1": 4000,  "bet2": 8000},
+    7:  {"bet1": 6000,  "bet2": 12000},
+    8:  {"bet1": 8000,  "bet2": 16000},
+    9:  {"bet1": 10000, "bet2": 20000},
     10: {"bet1": 14000, "bet2": 28000},
     11: {"bet1": 19000, "bet2": 38000},
     12: {"bet1": 25000, "bet2": 50000},
@@ -68,7 +74,7 @@ def clamp(x, lo=0.0, hi=1.0):
 # ══════════════════════════════════════════════════════════
 #  BETTING MANAGER (ORIGINAL RULES PRESERVED - NO CAP)
 # ══════════════════════════════════════════════════════════
-class BettingManagerV36:
+class BettingManager:
     def __init__(self):
         self.reset_all()
 
@@ -166,7 +172,7 @@ class BettingManagerV36:
 # ══════════════════════════════════════════════════════════
 @dataclass
 class V36Decision:
-    action: str          # Always "BET" (100% Signal Rate)
+    action: str          # "BET" (100% High Frequency)
     signal: str          # "Big" or "Small"
     confidence: float
     tactical_mode: str
@@ -203,16 +209,17 @@ class PredictionEngineV36:
     def predict(self, current_level: int, current_state: str) -> V36Decision:
         h = list(self.history)
         if len(h) < CONFIG["warmup_target"]:
-            return V36Decision("BET", "Big" if sum(h[-5:]) >= 3 else "Small", 0.50, "WARMUP", current_level)
+            side = "Big" if sum(h[-5:]) >= 3 else "Small"
+            return V36Decision("BET", side, 0.50, "WARMUP", current_level)
 
         last = h[-1]
         run_len = self._get_run_length()
 
-        # 1. Base Markov Probabilities
+        # 1. Base Markov
         m_stats = self.markov_mem[last]
         p_m = (m_stats[1] + 1.0) / (sum(m_stats) + 2.0)
 
-        # 2. Pattern Matcher
+        # 2. 2-Order Pattern Matcher
         key2 = (h[-2], last) if len(h) >= 2 else (0, last)
         p_stats = self.pattern_mem[key2]
         p_pat = (p_stats[1] + 1.0) / (sum(p_stats) + 2.0)
@@ -222,23 +229,19 @@ class PredictionEngineV36:
         mode = "STANDARD_FLOW"
 
         # 3. CRITICAL CYCLE-BREAKER POLICY (Level 4+ Interception)
-        # Level 4 ကျော်သည်နှင့် အဆင့်မြင့် အမှားဆက်မဖြစ်စေရန် Streak Dynamics ကို တိုက်ရိုက်ထိန်းချုပ်ခြင်း
         if current_level >= 4:
             mode = f"APEX_INTERCEPT_L{current_level}"
             if run_len >= 2:
-                # တွဲလုံးဖြစ်နေလျှင် လိုက်လံစီးမျောပြီး ပိုရှည်လာပါက ချက်ချင်းဖောက်ထုတ်သည်
                 if run_len >= 4:
                     side = "Small" if last == 1 else "Big"
                 else:
                     side = "Big" if last == 1 else "Small"
             else:
-                # Alternating ဖြစ်နေပါက ခေါက်ပွဲအတိုင်း လျင်မြန်စွာ တုံ့ပြန်သည်
                 side = "Small" if last == 1 else "Big"
 
-        # 4. BET 2 RAPID RESET LOCK (Level 1 သို့ ချက်ချင်းဆင်းနိုင်ရေး အဓိက ကဏ္ဍ)
+        # 4. BET 2 RAPID RESET LOCK (Focuses on Instant Reset to Level 1)
         if current_state == "WAITING_BET2":
             mode = "BET2_RAPID_RESET_LOCK"
-            # Bet 1 နိုင်ပြီးနောက် ချက်ချင်း Reset ချနိုင်ရန် မကြာသေးမီက မိုမင်တမ်ကို အပြည့်အဝ ထိန်းသိမ်းသည်
             if run_len >= 2:
                 side = "Big" if last == 1 else "Small"
             else:
@@ -255,30 +258,193 @@ class PredictionEngineV36:
         )
 
 # ══════════════════════════════════════════════════════════
-#  LIVE RUNNER CONTROLLER
+#  LIVE BOT & TELEGRAM DISPATCHER
 # ══════════════════════════════════════════════════════════
 class V36LiveBot:
     def __init__(self):
+        self.lock = threading.Lock()
         self.engine = PredictionEngineV36()
-        self.betting = BettingManagerV36()
+        self.betting = BettingManager()
         self.last_decision: Optional[V36Decision] = None
+        self.is_warmup = True
+
+    def send_telegram(self, message: str):
+        if not TELEGRAM_TOKEN or not CHAT_ID:
+            print(f"[TG-LOG] {message[:100]}...", flush=True)
+            return
+
+        def _send():
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
+            for _ in range(3):
+                try:
+                    res = requests.post(url, json=payload, timeout=8)
+                    if res.status_code == 200:
+                        break
+                except Exception:
+                    time.sleep(1)
+
+        threading.Thread(target=_send, daemon=True).start()
 
     def process_round(self, period: str, digit: int):
-        actual_big = 1 if digit >= 5 else 0
+        with self.lock:
+            actual_big = 1 if digit >= 5 else 0
+            actual_text = "Big" if actual_big == 1 else "Small"
 
-        if self.last_decision and self.last_decision.action == "BET":
-            won = (1 if self.last_decision.signal == "Big" else 0) == actual_big
-            settle = self.betting.apply_result(won)
-            tag = "✅ WON" if won else "❌ LOST"
-            print(f"[{period}] {settle['bet_type']} -> {tag} | Net: {self.betting.current_profit:+,.0f} | Level: {self.betting.level}")
+            # 1. Resolve Previous Bet
+            if self.last_decision and self.last_decision.action == "BET":
+                won = (1 if self.last_decision.signal == "Big" else 0) == actual_big
+                settle = self.betting.apply_result(won)
 
-            reset = self.betting.check_profit_reset()
-            if reset:
-                print(f"🏆 PROFIT RESET TRIGGERED! Banked: +{reset['net_profit']:,} | Reset back to Level 1.")
+                if won:
+                    if settle['action'] == 'RESET':
+                        self.send_telegram(
+                            f"✅ <b>WIN (+{settle['profit']:,.0f})</b>\n"
+                            f"🎉 <b>BET2 WIN ➔ LEVEL 1 RESET!</b>\n"
+                            f"Level: {settle['old_level']} ➔ 1\n"
+                            f"Profit: <b>{self.betting.current_profit:+,.0f}</b>\n"
+                            f"WR: {self.betting.get_wr():.1f}%"
+                        )
+                    else:
+                        self.send_telegram(
+                            f"✅ <b>WIN (+{settle['profit']:,.0f})</b>\n"
+                            f"➡️ <b>BET1 WIN ➔ PROCEED TO BET2</b>\n"
+                            f"Level: {self.betting.level} | Next: BET2\n"
+                            f"Profit: <b>{self.betting.current_profit:+,.0f}</b>"
+                        )
+                else:
+                    self.send_telegram(
+                        f"❌ <b>LOSS ({settle['profit']:,.0f})</b>\n"
+                        f"⚠️ Level: {settle['old_level']} ➔ {settle['new_level']}\n"
+                        f"Profit: <b>{self.betting.current_profit:+,.0f}</b>"
+                    )
 
-        self.engine.resolve(actual_big)
-        decision = self.engine.predict(current_level=self.betting.level, current_state=self.betting.level_state)
-        self.last_decision = decision
+                reset = self.betting.check_profit_reset()
+                if reset:
+                    self.send_telegram(
+                        f"🏆 <b>PROFIT RESET TARGET HIT!</b>\n"
+                        f"Net Banked: <b>+{reset['net_profit']:,.0f}</b>\n"
+                        f"Max Level: {reset['max_level']}\n"
+                        f"Resetting back to Level 1..."
+                    )
 
-        bet_amt, b_type = self.betting.get_current_bet()
-        print(f"📡 SIGNAL: {decision.signal.upper()} | Bet: {bet_amt:,} ({b_type}) | Level: {self.betting.level} | Mode: {decision.tactical_mode}")
+            # 2. Update Engine Knowledge
+            self.engine.resolve(actual_big)
+
+            # 3. Check Warmup
+            if len(self.engine.history) < CONFIG["warmup_target"]:
+                print(f"[WARMUP] Collected {len(self.engine.history)}/{CONFIG['warmup_target']} rounds.", flush=True)
+                return
+
+            # 4. Generate Next Prediction
+            decision = self.engine.predict(current_level=self.betting.level, current_state=self.betting.level_state)
+            self.last_decision = decision
+            bet_amt, b_type = self.betting.get_current_bet()
+            self.betting.total_signals += 1
+
+            # Dispatch Signal to Telegram
+            self.send_telegram(
+                f"🚨 <b>PERIOD {str(period)[-4:]} SIGNAL</b>\n"
+                f"🎯 TARGET: <b>{decision.signal.upper()}</b>\n"
+                f"📊 Conf: {decision.confidence:.1%} | Mode: <code>{decision.tactical_mode}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"💰 Level: <b>{self.betting.level}</b> ({b_type})\n"
+                f"💵 Bet: <b>{bet_amt:,}</b>\n"
+                f"📈 Net Profit: <b>{self.betting.current_profit:+,.0f}</b> | WR: {self.betting.get_wr():.1f}%\n"
+                f"🎲 Last: {digit} ({actual_text})"
+            )
+
+# ══════════════════════════════════════════════════════════
+#  API POLLER WORKER
+# ══════════════════════════════════════════════════════════
+def run_api_poller(bot: V36LiveBot):
+    print("🚀 V36.0 Live Poller Loop Started...", flush=True)
+    seen_periods = set()
+    seen_order = deque(maxlen=1000)
+    is_first_poll = True
+
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {LOTTERY_AUTH}",
+        "content-type": "application/json;charset=UTF-8",
+        "origin": "https://6win598.com",
+        "referer": "https://6win598.com/",
+        "user-agent": "Mozilla/5.0",
+    }
+
+    while True:
+        try:
+            payload = {
+                "pageSize": 10, "pageNo": 1, "typeId": 30, "language": 7,
+                "random": "036263f367384d418be07465793c8da8",
+                "signature": "55F4FD150F15F090B943374F3C9BE78B",
+                "timestamp": int(time.time()),
+            }
+            res = requests.post(CONFIG["api_url"], headers=headers, json=payload, timeout=5)
+            if res.status_code == 200:
+                data = res.json().get("data", {}).get("list", [])
+                if data:
+                    sorted_data = sorted(data, key=lambda x: int(x.get("issueNumber", 0)))
+                    for item in sorted_data:
+                        period = str(item.get("issueNumber"))
+                        num = int(item.get("number"))
+                        if period not in seen_periods:
+                            seen_periods.add(period)
+                            seen_order.append(period)
+                            if len(seen_periods) > 1000:
+                                oldest = seen_order.popleft()
+                                seen_periods.discard(oldest)
+
+                            if not is_first_poll:
+                                print(f"[ROUND] {period} -> Number: {num}", flush=True)
+                                bot.process_round(period, num)
+                            else:
+                                bot.engine.history.append(1 if num >= 5 else 0)
+
+                    if is_first_poll:
+                        is_first_poll = False
+                        print(f"✅ Initialized with {len(bot.engine.history)} historical rounds.", flush=True)
+        except Exception as e:
+            print(f"[POLL ERROR] {e}", flush=True)
+
+        time.sleep(CONFIG["poll_interval"])
+
+# ══════════════════════════════════════════════════════════
+#  FLASK WEB SERVER (PREVENTS RENDER EXIT EARLY)
+# ══════════════════════════════════════════════════════════
+app = Flask(__name__)
+GLOBAL_BOT: Optional[V36LiveBot] = None
+
+@app.route("/")
+def index():
+    if not GLOBAL_BOT:
+        return "Bot Initializing...", 200
+    b = GLOBAL_BOT.betting
+    return f"""
+    <h2>V36.0 APEX-SINGULARITY BOT RUNNING</h2>
+    <p><b>Status:</b> Active (100% Signal Frequency)</p>
+    <p><b>Current Level:</b> {b.level} ({b.level_state})</p>
+    <p><b>Net Profit:</b> {b.current_profit:+,.0f}</p>
+    <p><b>Win Rate:</b> {b.get_wr():.1f}%</p>
+    <p><b>Max Level Seen:</b> {b.max_level_reached}</p>
+    <p><b>Profit Resets Completed:</b> {b.profit_resets}</p>
+    """, 200
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "healthy", "service": "V36-APEX-BOT"}), 200
+
+# ══════════════════════════════════════════════════════════
+#  MAIN ENTRY POINT
+# ══════════════════════════════════════════════════════════
+if __name__ == "__main__":
+    print("🌟 Starting V36.0 Apex-Singularity Bot Service...", flush=True)
+    GLOBAL_BOT = V36LiveBot()
+
+    # Background Thread အဖြစ် Poller စတင်ခြင်း
+    poller_thread = threading.Thread(target=run_api_poller, args=(GLOBAL_BOT,), daemon=True)
+    poller_thread.start()
+
+    # Render Service မပိတ်သွားစေရန် Flask Server ကို 0.0.0.0 တွင် Listen လုပ်ခြင်း
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
