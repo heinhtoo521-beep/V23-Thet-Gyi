@@ -1,11 +1,9 @@
 """
-V400 — FINAL LAYOUT TELEGRAM SCRIPT
-===================================
+V400 — AUTO-POLLING BACKGROUND WORKER TELEGRAM SCRIPT
+======================================================
 - Features:
-  * Exact Telegram message layout as requested.
-  * VIP Elite format with `👑 Status: 100% (Max :N)`
-  * Standard Signal format with `(Max: N)` on a new line.
-  * Clean skip format, no loss messages, automatic milestone/level reset.
+  * Runs 6lottery API Polling automatically in a background daemon thread.
+  * Ensures Telegram messages are sent out even without external web traffic.
 """
 
 from __future__ import annotations
@@ -21,6 +19,7 @@ from flask import Flask, jsonify
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
 CHAT_ID = os.environ.get("CHAT_ID", "")
+LOTTERY_AUTH = os.environ.get("LOTTERY_AUTH", "")
 
 CONFIG = {
     "api_url": "https://6lotteryapi.com/api/webapi/GetNoaverageEmerdList",
@@ -250,6 +249,7 @@ class V400LiveBot:
         self.engine = PredictionEngineV400()
         self.betting = BettingManager()
         self.last_decision: Optional[V400Decision] = None
+        self.last_processed_period = None
 
     def send_telegram_sync(self, message: str):
         if not TELEGRAM_TOKEN or not CHAT_ID:
@@ -329,12 +329,37 @@ class V400LiveBot:
                     )
                 self.send_telegram_sync(msg)
 
+    def start_polling_loop(self):
+        def worker():
+            print("[V400] Polling worker started...", flush=True)
+            headers = {"Authorization": LOTTERY_AUTH, "Content-Type": "application/json"}
+            while True:
+                try:
+                    payload = {"pageSize": 10, "pageNo": 1, "typeId": 1}
+                    res = requests.post(CONFIG["api_url"], json=payload, headers=headers, timeout=5)
+                    if res.status_code == 200:
+                        data = res.json()
+                        list_data = data.get("data", {}).get("list", [])
+                        if list_data:
+                            latest = list_data[0]
+                            period = str(latest.get("issueNumber"))
+                            digit = int(latest.get("number"))
+                            if period != self.last_processed_period:
+                                self.last_processed_period = period
+                                self.process_round(period, digit)
+                except Exception as e:
+                    print(f"[Polling Error] {e}", flush=True)
+                time.sleep(CONFIG["poll_interval"])
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+
 app = Flask(__name__)
 GLOBAL_BOT: Optional[V400LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V400 Final Layout Telegram Engine Active!", 200
+    return "V400 Auto-Polling Telegram Engine Active!", 200
 
 @app.route("/health")
 def health():
@@ -342,5 +367,6 @@ def health():
 
 if __name__ == "__main__":
     GLOBAL_BOT = V400LiveBot()
+    GLOBAL_BOT.start_polling_loop()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
