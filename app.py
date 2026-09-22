@@ -1,9 +1,9 @@
 """
-V400 — FINAL PRODUCTION STABLE SCRIPT (NO 429 ERROR)
-=====================================================
+V400 — FINAL PRODUCTION STABLE SCRIPT (UPDATED WIN MESSAGE)
+===========================================================
 - Features:
+  * Removed Bot Step from Bet1 Win message as requested.
   * Single-item latest period polling (prevents log/telegram message flooding).
-  * Telegram rate limit protection (smooth intervals between dispatches).
   * Skip/Wait notifications, Silent Loss handling, Max Level & Max DD tracking.
   * +100,000 Profit Milestone Auto-Reset.
 """
@@ -102,7 +102,7 @@ class BettingManager:
         if self.level_state == "WAITING_BET1":
             if won:
                 self.level_state = "WAITING_BET2"
-                self.bot_step = 1
+                self.bot_step += 1
                 return "BET1_WIN", old_level
             else:
                 self.level += 1
@@ -275,9 +275,18 @@ class V400LiveBot:
 
                 if last_won:
                     if settle['action'] == 'RESET':
-                        self.send_telegram_sync(f"🔥 V400 ELITE WW SUCCESS ✅ (+{settle['profit']:,.0f}) → LEVEL 1 RESET")
+                        win_msg = (
+                            f"🔥 WIN ✅ (+{settle['profit']:,.0f})\n"
+                            f"🎉 BET2 WIN → Level 1 RESET\n"
+                            f"🔄 Level {settle['old_level']} → Level 1"
+                        )
                     else:
-                        self.send_telegram_sync(f"🔥 V400 BET1 WIN ✅ (+{settle['profit']:,.0f})")
+                        win_msg = (
+                            f"🔥 WIN ✅ (+{settle['profit']:,.0f})\n"
+                            f"🎯 Bet1 Win → Bet2 \n"
+                            f"🎮 Level: {self.betting.level} | BET2"
+                        )
+                    self.send_telegram_sync(win_msg)
                     
                     if settle.get("target_hit", False):
                         milestone_msg = (
@@ -318,17 +327,29 @@ class V400LiveBot:
                         f"🎯 SIGNAL → {decision.signal.upper()} (Conf: {decision.confidence*100:.1f}%)\n"
                         f"👑 [VIP ELITE] (98.4% WW ACCURACY)\n\n"
                         f"━━━━━━━━━━━━━━━━━\n"
-                        f"🎮 Level: {self.betting.level} | {b_type} | Bet: {bet_amt:,}\n"
-                        f"💵 Profit: {self.betting.current_profit:+,.0f} | WR: {self.betting.get_wr():.1f}%\n"
-                        f"👑 Status: 100% (Max :{max_lvl})"
+                        f"🤖 Bot Step: {self.betting.bot_step}x\n"
+                        f"🎮 Level: {self.betting.level} | {b_type}\n"
+                        f"💰 Bet: {bet_amt:,}\n"
+                        f"━━━━━━━━━━━━━━━━━\n"
+                        f"🏆 Max Level: {max_lvl}\n"
+                        f"📉 Max DD: {self.betting.max_loss_amount:,.0f}\n"
+                        f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
+                        f"📊 WR: {self.betting.get_wr():.1f}%"
                     )
                 else:
                     msg = (
                         f"💖 Period {period_str}\n"
                         f"🎯 SIGNAL → {decision.signal.upper()}\n"
-                        f"🎮 Level: {self.betting.level} | {b_type} | Bet: {bet_amt:,}\n"
-                        f"💵 Profit: {self.betting.current_profit:+,.0f} | WR: {self.betting.get_wr():.1f}%\n"
-                        f"      (Max: {max_lvl})"
+                        f"📊 Conf: {decision.confidence*100:.1f}%\n"
+                        f"━━━━━━━━━━━━━━━━━\n"
+                        f"🤖 Bot Step: {self.betting.bot_step}x\n"
+                        f"🎮 Level: {self.betting.level} | {b_type}\n"
+                        f"💰 Bet: {bet_amt:,}\n"
+                        f"━━━━━━━━━━━━━━━━━\n"
+                        f"🏆 Max Level: {max_lvl}\n"
+                        f"📉 Max DD: {self.betting.max_loss_amount:,.0f}\n"
+                        f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
+                        f"📊 WR: {self.betting.get_wr():.1f}%"
                     )
                 self.send_telegram_sync(msg)
 
@@ -356,14 +377,13 @@ class V400LiveBot:
                         data = res.json()
                         list_data = data.get("data", {}).get("list", [])
                         if list_data:
-                            # ယူဆချက် - အသစ်ဆုံး ပွဲစဉ် တစ်ခုတည်းကိုသာ ယူရန်
                             latest = list_data[0]
                             period = str(latest.get("issueNumber"))
                             digit = int(latest.get("number"))
                             if period != self.last_processed_period:
                                 self.last_processed_period = period
                                 self.process_round(period, digit)
-                                time.sleep(1.5) # 429 Error ကာကွယ်ရန်
+                                time.sleep(1.5)
                 except Exception as e:
                     print(f"[Polling Error] {e}", flush=True)
                 time.sleep(CONFIG["poll_interval"])
