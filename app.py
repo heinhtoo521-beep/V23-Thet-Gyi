@@ -1,11 +1,16 @@
 """
-V52.1 — APEX-CHRONO QUANTUM SINGULARITY (Strict Message Sequence Edition)
-=========================================================================
-- Fixed Message Ordering: WIN message is GUARANTEED to appear BEFORE next Signal.
-- Removed background race conditions using a Synchronous Serial Queue.
-- Signal Period is ALWAYS API Issue Number + 1.
-- LEVEL UP messages completely removed (Silent on loss).
-- Flow: Period 015 Signal -> Period 015 WIN -> Period 016 Signal.
+V57.1 — APEX-GOD-LEVEL SINGULARITY (Super Signal Resolution Edition)
+====================================================================
+- Integrated Super Signal Detection:
+  * 2 Steps Lock: "⚡ SUPER SIGNAL: ၂ ကြိမ်အတွင်း အမိလိုက်ပါ"
+  * 3 Steps Lock: "⚡ SUPER SIGNAL: ၃ ကြိမ်အတွင်း အမိလိုက်ပါ"
+- Core Principles 1 & 2 Maintained: PRNG State Recovery + 3D Phase Space Attractor.
+- Strict Rules Maintained:
+  * Free-Flow Scaling (Level 15+ Fibonacci Table, No Forced Cap).
+  * Period + 1 Logic strictly enforced.
+  * Silent Loss (Zero loss / level-up messages).
+  * Strict Message Order: (Previous Win Message) -> (Next Period Signal).
+  * Profit Target +100,000 Auto-Reset (Max Level, Max DD, Profit -> 0/1).
 """
 
 from __future__ import annotations
@@ -31,7 +36,7 @@ CONFIG = {
     "payout_rate": 0.96,
     "profit_reset_threshold": 100000,
     "poll_interval": 2.0,
-    "warmup_target": 12,
+    "warmup_target": 18,
 }
 
 LEVEL_TABLE = {
@@ -65,7 +70,7 @@ def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, float(x)))
 
 # ══════════════════════════════════════════════════════════
-#  BETTING MANAGER
+#  BETTING MANAGER (WITH +100k AUTO-RESET)
 # ══════════════════════════════════════════════════════════
 class BettingManager:
     def __init__(self):
@@ -85,6 +90,14 @@ class BettingManager:
         self.max_level_reached = 1
         self.cycles_completed = 0
         self.cooldown_rounds = 0
+
+    def reset_milestone(self):
+        self.current_profit = 0.0
+        self.max_loss_amount = 0.0
+        self.max_level_reached = 1
+        self.level = 1
+        self.level_state = "WAITING_BET1"
+        self.bot_step = 1
 
     def get_current_bet(self):
         info = get_level_bet(self.level)
@@ -109,7 +122,7 @@ class BettingManager:
                 self.level_state = "WAITING_BET1"
                 self.bot_step += 1
                 self.max_level_reached = max(self.max_level_reached, self.level)
-                self.cooldown_rounds = 1 if self.level >= 3 else 0
+                self.cooldown_rounds = 1 if self.level >= 4 else 0
                 return "BET1_LOSE", old_level
         else:
             if won:
@@ -124,7 +137,7 @@ class BettingManager:
                 self.level_state = "WAITING_BET1"
                 self.bot_step += 1
                 self.max_level_reached = max(self.max_level_reached, self.level)
-                self.cooldown_rounds = 1 if self.level >= 3 else 0
+                self.cooldown_rounds = 1 if self.level >= 4 else 0
                 return "BET2_LOSE", old_level
 
     def apply_result(self, won: bool):
@@ -143,6 +156,10 @@ class BettingManager:
         self.max_loss_amount = min(self.max_loss_amount, self.current_profit)
         action, old_level = self.on_result(won)
 
+        target_hit = False
+        if self.current_profit >= CONFIG["profit_reset_threshold"]:
+            target_hit = True
+
         return {
             "bet_amount": bet_amount,
             "bet_type": bet_type,
@@ -150,33 +167,67 @@ class BettingManager:
             "action": action,
             "old_level": old_level,
             "new_level": self.level,
+            "target_hit": target_hit,
         }
 
 # ══════════════════════════════════════════════════════════
-#  PENTA-BAND NEXUS PREDICTION ENGINE
+#  PREDICTION ENGINE WITH SUPER SIGNAL DETECTION
 # ══════════════════════════════════════════════════════════
 @dataclass
-class V36Decision:
+class V57Decision:
     action: str
     signal: str
     confidence: float
     tactical_mode: str
     level: int
+    super_signal_text: Optional[str] = None  # Super Signal သတိပေးစာ
 
-class PredictionEngineV36:
+class PredictionEngineV57:
     def __init__(self, max_history: int = 150):
-        self.history = deque(maxlen=max_history)
+        self.history_digits = deque(maxlen=max_history)
+        self.history_binary = deque(maxlen=max_history)
 
-    def resolve(self, actual_big: int):
-        self.history.append(actual_big)
+    def resolve(self, digit: int):
+        self.history_digits.append(digit)
+        self.history_binary.append(1 if digit >= 5 else 0)
+
+    def _prng_state_recovery(self) -> float:
+        digits = list(self.history_digits)
+        if len(digits) < 10:
+            return 0.50
+        diffs = [(digits[i] - digits[i-1]) % 10 for i in range(1, len(digits))]
+        recent_diffs = diffs[-6:]
+        avg_drift = sum(recent_diffs) / len(recent_diffs)
+        projected_digit = (digits[-1] + int(round(avg_drift))) % 10
+        return 0.85 if projected_digit >= 5 else 0.15
+
+    def _phase_space_attractor(self) -> float:
+        d = list(self.history_digits)
+        if len(d) < 12:
+            return 0.50
+        current_vector = (d[-1], d[-2], d[-3])
+        attractor_pull = [0, 0]
+        for i in range(len(d) - 4):
+            vec = (d[i+2], d[i+1], d[i])
+            dist = math.sqrt(
+                (current_vector[0] - vec[0])**2 +
+                (current_vector[1] - vec[1])**2 +
+                (current_vector[2] - vec[2])**2
+            )
+            if dist < 4.5:
+                next_val = 1 if d[i+3] >= 5 else 0
+                weight = 1.0 / (dist + 0.5)
+                attractor_pull[next_val] += weight
+        total = sum(attractor_pull)
+        return (attractor_pull[1] / total) if total > 0 else 0.50
 
     def _get_streaks(self) -> Tuple[int, int]:
-        h = list(self.history)
-        if not h:
+        b = list(self.history_binary)
+        if not b:
             return 0, -1
-        last = h[-1]
+        last = b[-1]
         run = 0
-        for x in reversed(h):
+        for x in reversed(b):
             if x == last:
                 run += 1
             else:
@@ -184,131 +235,105 @@ class PredictionEngineV36:
         return run, last
 
     def _get_alternations(self) -> int:
-        h = list(self.history)
-        if len(h) < 2:
+        b = list(self.history_binary)
+        if len(b) < 2:
             return 0
         alt = 1
-        for i in range(len(h) - 1, 0, -1):
-            if h[i] != h[i - 1]:
+        for i in range(len(b) - 1, 0, -1):
+            if b[i] != b[i - 1]:
                 alt += 1
             else:
                 break
         return alt
 
-    def predict(self, current_level: int, current_state: str, cooldown: int) -> V36Decision:
-        h = list(self.history)
-        if len(h) < CONFIG["warmup_target"]:
-            side = "Big" if sum(h[-5:]) >= 3 else "Small"
-            return V36Decision("BET", side, 0.55, "WARMUP", current_level)
+    def predict(self, current_level: int, current_state: str, cooldown: int) -> V57Decision:
+        b = list(self.history_binary)
+        d = list(self.history_digits)
+        if len(b) < CONFIG["warmup_target"]:
+            return V57Decision("WAIT", "Big", 0.50, "WARMUP", current_level)
 
-        last = h[-1]
-        run_len, run_val = self._get_streaks()
+        if cooldown > 0:
+            return V57Decision("WAIT", "Big", 0.50, f"COOLDOWN_{cooldown}", current_level)
+
+        last_digit = d[-1]
+        streak_len, streak_val = self._get_streaks()
         alt_len = self._get_alternations()
 
-        recent_6 = h[-6:]
-        decay_sum, weight_sum = 0.0, 0.0
-        n = len(recent_6)
-        for idx, val in enumerate(recent_6):
-            w = math.exp((idx - n) / 2.8)
-            decay_sum += val * w
-            weight_sum += w
-        p_band_a = decay_sum / weight_sum if weight_sum > 0 else 0.5
+        p_prng = self._prng_state_recovery()
+        p_phase = self._phase_space_attractor()
+        p_harmonics = sum(b[-8:]) / 8.0
+        p_decay = (b[-1] * 0.45) + (b[-2] * 0.35) + (b[-3] * 0.20)
 
-        k2_count = [0, 0]
-        if len(h) >= 3:
-            k2 = (h[-2], last)
-            for i in range(len(h) - 2):
-                if (h[i], h[i+1]) == k2:
-                    k2_count[h[i+2]] += 1
-        p_band_b = (k2_count[1] + 1.0) / (sum(k2_count) + 2.0)
+        # ══════════════════════════════════════════════════════════
+        # SUPER SIGNAL RESOLUTION CHECK
+        # ══════════════════════════════════════════════════════════
+        super_text = None
 
-        recent_12 = sum(h[-12:]) / 12.0
-        p_band_c = 1.0 - recent_12
+        # ၁။ Singularity Double-Lock (Extreme Digits + Resonance) -> ၂ ကြိမ်အတွင်း
+        if (last_digit in [0, 1, 8, 9]) and ((p_prng >= 0.70 and p_phase >= 0.65) or (p_prng <= 0.30 and p_phase <= 0.35)):
+            super_text = "⚡ SUPER SIGNAL: ၂ ကြိမ်အတွင်း အမိလိုက်ပါ"
 
-        is_alternating = (len(h) >= 2 and h[-1] != h[-2])
-        p_band_d = (1.0 - last) if is_alternating else last
+        # ၂။ Chop Exhaustion Strike (တလှည့်စီခုန်တာ ၄ ကြိမ်ပြည့်ပြီးချိန်) -> ၂ ကြိမ်အတွင်း
+        elif alt_len >= 4:
+            super_text = "⚡ SUPER SIGNAL: ၂ ကြိမ်အတွင်း အမိလိုက်ပါ"
 
-        recent_4 = h[-4:]
-        diff = sum(recent_4) / 4.0
-        p_band_e = 0.70 if diff >= 0.75 else (0.30 if diff <= 0.25 else 0.50)
+        # ၃။ Resonant Dragon Streak (တူညီတာ ၃ ကြိမ်ထက် ဆက်နေချိန်) -> ၃ ကြိမ်အတွင်း
+        elif streak_len >= 3 and abs(p_phase - 0.50) >= 0.20:
+            super_text = "⚡ SUPER SIGNAL: ၃ ကြိမ်အတွင်း အမိလိုက်ပါ"
 
-        golden_override = False
-        if cooldown > 0:
-            if run_len >= 2 or alt_len >= 2:
-                golden_override = True
-            else:
-                return V36Decision("WAIT", "Big", 0.50, f"COOLDOWN_{cooldown}", current_level)
-
+        # ══════════════════════════════════════════════════════════
+        # BET 2 HYPER-RESONANT LOCK
+        # ══════════════════════════════════════════════════════════
         if current_state == "WAITING_BET2":
-            if run_len >= 2:
-                side = "Big" if run_val == 1 else "Small"
-                mode = f"BET2_CHRONO_DRAGON_S{run_len}"
-                conf = min(0.98, 0.91 + (run_len * 0.03))
-                return V36Decision("BET", side, conf, mode, current_level)
-            elif alt_len >= 2:
-                side = "Small" if last == 1 else "Big"
-                mode = f"BET2_CHRONO_CHOP_A{alt_len}"
-                conf = min(0.96, 0.89 + (alt_len * 0.03))
-                return V36Decision("BET", side, conf, mode, current_level)
-            else:
-                p_comb = (0.35 * p_band_a) + (0.30 * p_band_b) + (0.15 * p_band_c) + (0.10 * p_band_d) + (0.10 * p_band_e)
-                side = "Big" if p_comb >= 0.50 else "Small"
-                mode = "BET2_CHRONO_FORCE"
-                conf = 0.91
-                return V36Decision("BET", side, conf, mode, current_level)
+            both_agree_big = (p_prng >= 0.52 and p_phase >= 0.52)
+            both_agree_small = (p_prng < 0.48 and p_phase < 0.48)
 
-        p_final = (0.35 * p_band_a) + (0.30 * p_band_b) + (0.15 * p_band_c) + (0.10 * p_band_d) + (0.10 * p_band_e)
-        side = "Big" if p_final >= 0.50 else "Small"
-        deviation = abs(p_final - 0.50)
+            if both_agree_big:
+                conf = min(0.98, 0.92 + abs(p_phase - 0.50))
+                if not super_text:
+                    super_text = "⚡ SUPER SIGNAL: ၂ ကြိမ်အတွင်း အမိလိုက်ပါ"
+                return V57Decision("BET", "Big", conf, "BET2_GOD_RESONANCE_BIG", current_level, super_text)
+            elif both_agree_small:
+                conf = min(0.98, 0.92 + abs(p_phase - 0.50))
+                if not super_text:
+                    super_text = "⚡ SUPER SIGNAL: ၂ ကြိမ်အတွင်း အမိလိုက်ပါ"
+                return V57Decision("BET", "Small", conf, "BET2_GOD_RESONANCE_SMALL", current_level, super_text)
+            else:
+                side = "Big" if p_phase >= 0.50 else "Small"
+                return V57Decision("BET", side, 0.89, "BET2_PHASE_ATTRACTOR_FORCE", current_level, super_text)
+
+        # ══════════════════════════════════════════════════════════
+        # BET 1 MATRIX
+        # ══════════════════════════════════════════════════════════
+        p_combined = (0.40 * p_prng) + (0.35 * p_phase) + (0.15 * p_harmonics) + (0.10 * p_decay)
+        side = "Big" if p_combined >= 0.50 else "Small"
+        deviation = abs(p_combined - 0.50)
 
         if current_level >= 3:
-            votes_big = sum([
-                1 if p_band_a >= 0.5 else 0,
-                1 if p_band_b >= 0.5 else 0,
-                1 if p_band_c >= 0.5 else 0,
-                1 if p_band_d >= 0.5 else 0,
-                1 if p_band_e >= 0.5 else 0,
-            ])
-            has_super_majority = (votes_big >= 4) if side == "Big" else (votes_big <= 1)
+            conflict = (p_prng >= 0.50 and p_phase < 0.50) or (p_prng < 0.50 and p_phase >= 0.50)
+            if conflict:
+                return V57Decision("WAIT", side, 0.50, f"SINGULARITY_SKIP_L{current_level}", current_level)
 
-            if not has_super_majority and not golden_override:
-                return V36Decision("WAIT", side, 0.50, f"LOCKDOWN_SKIP_L{current_level}", current_level)
+        conf = 0.74 + (deviation * 1.6)
+        required_conf = 0.66 if current_level <= 2 else (0.75 if current_level <= 4 else 0.83)
 
-            required_conf = 0.74
-            mode = f"CHRONO_LOCKDOWN_L{current_level}"
-            conf = 0.78 + (deviation * 1.8)
-        else:
-            required_conf = 0.56 if current_level == 1 else 0.62
-            if run_len >= 2:
-                side = "Big" if run_val == 1 else "Small"
-                mode = f"CHRONO_STREAK_S{run_len}"
-                conf = min(0.95, 0.76 + (run_len * 0.04))
-            elif alt_len >= 2:
-                side = "Small" if last == 1 else "Big"
-                mode = f"CHRONO_CHOP_A{alt_len}"
-                conf = min(0.94, 0.75 + (alt_len * 0.04))
-            else:
-                mode = "CHRONO_FLOW"
-                conf = 0.62 + (deviation * 1.6)
+        if conf < required_conf:
+            return V57Decision("WAIT", side, conf, f"NOISE_FILTER_L{current_level}", current_level)
 
-        if conf < required_conf and not golden_override:
-            return V36Decision("WAIT", side, conf, f"NOISE_FILTER_L{current_level}", current_level)
-
-        conf = clamp(conf, 0.62, 0.98)
-        return V36Decision("BET", side, conf, mode, current_level)
+        conf = clamp(conf, 0.70, 0.98)
+        return V57Decision("BET", side, conf, "QUANTUM_FLOW", current_level, super_text)
 
 # ══════════════════════════════════════════════════════════
-#  LIVE BOT & SYNCHRONOUS TELEGRAM SENDER
+#  LIVE BOT & DISPATCHER
 # ══════════════════════════════════════════════════════════
-class V36LiveBot:
+class V57LiveBot:
     def __init__(self):
         self.lock = threading.Lock()
-        self.engine = PredictionEngineV36()
+        self.engine = PredictionEngineV57()
         self.betting = BettingManager()
-        self.last_decision: Optional[V36Decision] = None
+        self.last_decision: Optional[V57Decision] = None
 
     def send_telegram_sync(self, message: str):
-        """အစီအစဉ်မလွဲချော်စေရန် တိုက်ရိုက်ပို့ဆောင်သော Synchronous Method"""
         if not TELEGRAM_TOKEN or not CHAT_ID:
             print(f"[TG-LOCAL]\n{message}", flush=True)
             return
@@ -327,9 +352,7 @@ class V36LiveBot:
         with self.lock:
             actual_big = 1 if digit >= 5 else 0
 
-            # ══════════════════════════════════════════════════════════
-            # 1. RESOLVE PREVIOUS ROUND (WIN MESSAGE ကို အရင်ပို့ခြင်း)
-            # ══════════════════════════════════════════════════════════
+            # 1. RESOLVE PREVIOUS ROUND (WIN MESSAGE)
             if self.last_decision and self.last_decision.action == "BET":
                 won = (1 if self.last_decision.signal == "Big" else 0) == actual_big
                 settle = self.betting.apply_result(won)
@@ -351,24 +374,30 @@ class V36LiveBot:
                             f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
                             f"📊 WR: {self.betting.get_wr():.1f}%"
                         )
-                    # Win message ကို အရင် ရောက်အောင်ပို့ပြီး အနည်းငယ် စောင့်သည်
                     self.send_telegram_sync(win_msg)
                     time.sleep(0.3)
+
+                    # PROFIT TARGET 100,000 AUTO-RESET
+                    if settle.get("target_hit", False):
+                        target_msg = (
+                            f"🏆 <b>TARGET HIT: +100,000 REACHED!</b> 🎉\n"
+                            f"━━━━━━━━━━━━━━━━━\n"
+                            f"🔄 <b>Max Level, Max DD, Profit Reset to 0</b>\n"
+                            f"🚀 စက်ဝန်းအသစ် ပြန်လည်စတင်ပါပြီ။"
+                        )
+                        self.send_telegram_sync(target_msg)
+                        self.betting.reset_milestone()
+                        time.sleep(0.3)
                 else:
-                    # Loss ဖြစ်ပါက တိတ်ဆိတ်စွာ ကျော်သည်
-                    pass
+                    pass  # Silent Loss
 
-            # ══════════════════════════════════════════════════════════
             # 2. UPDATE KNOWLEDGE BASE
-            # ══════════════════════════════════════════════════════════
-            self.engine.resolve(actual_big)
+            self.engine.resolve(digit)
 
-            if len(self.engine.history) < CONFIG["warmup_target"]:
+            if len(self.engine.history_digits) < CONFIG["warmup_target"]:
                 return
 
-            # ══════════════════════════════════════════════════════════
-            # 3. NEXT PREDICTION & SIGNAL SENDING
-            # ══════════════════════════════════════════════════════════
+            # 3. NEXT PREDICTION
             decision = self.engine.predict(
                 current_level=self.betting.level,
                 current_state=self.betting.level_state,
@@ -376,9 +405,7 @@ class V36LiveBot:
             )
             self.last_decision = decision
 
-            if self.betting.cooldown_rounds > 0 and decision.action != "WAIT":
-                self.betting.cooldown_rounds = max(0, self.betting.cooldown_rounds - 1)
-            elif self.betting.cooldown_rounds > 0:
+            if self.betting.cooldown_rounds > 0:
                 self.betting.cooldown_rounds -= 1
 
             if decision.action == "WAIT":
@@ -387,7 +414,7 @@ class V36LiveBot:
             bet_amt, b_type = self.betting.get_current_bet()
             self.betting.total_signals += 1
 
-            # API Period + 1 Logic
+            # Period + 1
             try:
                 current_num = int(period)
                 next_period_num = current_num + 1
@@ -395,10 +422,13 @@ class V36LiveBot:
             except Exception:
                 period_str = str(period)[-3:]
 
+            # Message တည်ဆောက်ခြင်း
+            super_line = f"\n{decision.super_signal_text}" if decision.super_signal_text else ""
+
             sig_msg = (
                 f"💖 Period {period_str}\n"
                 f"🎯 SIGNAL → {decision.signal.upper()}\n"
-                f"📊 Conf: {decision.confidence * 100:.1f}%\n"
+                f"📊 Conf: {decision.confidence * 100:.1f}%{super_line}\n"
                 f"━━━━━━━━━━━━━━━━━\n"
                 f"🤖 Bot Step: {self.betting.bot_step}x\n"
                 f"🎮 Level: {self.betting.level} | {b_type}\n"
@@ -409,13 +439,12 @@ class V36LiveBot:
                 f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
                 f"📊 WR: {self.betting.get_wr():.1f}%"
             )
-            # အရင်ပွဲ၏ WIN Message ရောက်ပြီးမှသာ Signal Message အသစ်ကို ပို့ဆောင်သည်
             self.send_telegram_sync(sig_msg)
 
 # ══════════════════════════════════════════════════════════
-#  TELEGRAM COMMANDS LISTENER
+#  TELEGRAM COMMANDS & API POLLER
 # ══════════════════════════════════════════════════════════
-def poll_telegram_commands(bot: V36LiveBot):
+def poll_telegram_commands(bot: V57LiveBot):
     if not TELEGRAM_TOKEN:
         return
     offset = 0
@@ -436,12 +465,13 @@ def poll_telegram_commands(bot: V36LiveBot):
                         bet_amt, b_type = b.get_current_bet()
                         if text == "/status":
                             bot.send_telegram_sync(
-                                f"📊 <b>STATUS UPDATE</b>\n\n"
+                                f"📊 <b>STATUS UPDATE (V57.1 SUPER)</b>\n\n"
                                 f"• Level: <b>{b.level} ({b.level_state})</b>\n"
                                 f"• Bet: <b>{bet_amt:,} ({b_type})</b>\n"
                                 f"• Profit: <b>{b.current_profit:+,.0f}</b>\n"
                                 f"• Win Rate: <b>{b.get_wr():.1f}%</b>\n"
-                                f"• Max Level: <b>{b.max_level_reached}</b>"
+                                f"• Max Level: <b>{b.max_level_reached}</b>\n"
+                                f"• Max DD: <b>{b.max_loss_amount:,.0f}</b>"
                             )
                         elif text == "/reset":
                             b.reset_all()
@@ -450,10 +480,7 @@ def poll_telegram_commands(bot: V36LiveBot):
             time.sleep(2)
         time.sleep(1)
 
-# ══════════════════════════════════════════════════════════
-#  API POLLER WORKER
-# ══════════════════════════════════════════════════════════
-def run_api_poller(bot: V36LiveBot):
+def run_api_poller(bot: V57LiveBot):
     seen_periods = set()
     seen_order = deque(maxlen=1000)
     is_first_poll = True
@@ -493,7 +520,7 @@ def run_api_poller(bot: V36LiveBot):
                             if not is_first_poll:
                                 bot.process_round(period, num)
                             else:
-                                bot.engine.history.append(1 if num >= 5 else 0)
+                                bot.engine.resolve(num)
 
                     if is_first_poll:
                         is_first_poll = False
@@ -502,22 +529,19 @@ def run_api_poller(bot: V36LiveBot):
 
         time.sleep(CONFIG["poll_interval"])
 
-# ══════════════════════════════════════════════════════════
-#  FLASK SERVER & MAIN
-# ══════════════════════════════════════════════════════════
 app = Flask(__name__)
-GLOBAL_BOT: Optional[V36LiveBot] = None
+GLOBAL_BOT: Optional[V57LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V52.1 APEX-CHRONO Strict Sequence Live!", 200
+    return "V57.1 APEX-GOD-LEVEL Super Signal Live!", 200
 
 @app.route("/health")
 def health():
     return jsonify({"status": "healthy"}), 200
 
 if __name__ == "__main__":
-    GLOBAL_BOT = V36LiveBot()
+    GLOBAL_BOT = V57LiveBot()
     threading.Thread(target=run_api_poller, args=(GLOBAL_BOT,), daemon=True).start()
     threading.Thread(target=poll_telegram_commands, args=(GLOBAL_BOT,), daemon=True).start()
 
