@@ -105,10 +105,18 @@ class MegaTensorBot:
                 current_period_str = period
                 next_period_str = "NXT"
 
+            # Prevent duplicate processing of the same period
+            if period == self.last_processed_period:
+                return
+            self.last_processed_period = period
+
+            # Warmup Phase Handling (with anti-spam interval control)
             if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
                 self.engine.resolve(digit)
                 current_count = len(self.engine.long_buffer)
-                self.send_telegram_sync(f"📊 Mega v5.0 Warming up... [ {current_count} / 30 ] (Period {next_period_str})")
+                print(f"[Warming up...] {current_count} / {CONFIG['warmup_target']} (Period {period})", flush=True)
+                if current_count % 5 == 0 or current_count >= CONFIG["warmup_target"]:
+                    self.send_telegram_sync(f"📊 Mega v5.0 Warming up... [ {current_count} / {CONFIG['warmup_target']} ] (Period {next_period_str})")
                 return
 
             actual_outcome = "Small" if digit < 5 else "Big"
@@ -162,7 +170,7 @@ class MegaTensorBot:
                 skip_msg = f"💕 Period {next_period_str} = SKIP 💕"
                 self.send_telegram_sync(skip_msg)
             else:
-                # 4. Mega Signal Message with period incremented by 1 extra step (+2 from raw period)
+                # 4. Mega Signal Message with period incremented properly
                 try:
                     target_period_str = str(int(period) + 2)[-3:]
                 except Exception:
@@ -183,7 +191,7 @@ class MegaTensorBot:
 
     def start_polling_loop(self):
         def worker():
-            print("[Mega v5.0 Bot] Polling started with customized clean templates...", flush=True)
+            print("[Mega v5.0 Bot] Polling started with bugfixes & custom templates...", flush=True)
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
@@ -209,7 +217,6 @@ class MegaTensorBot:
                             period = str(latest.get("issueNumber"))
                             digit = int(latest.get("number"))
                             if period != self.last_processed_period:
-                                self.last_processed_period = period
                                 self.process_round(period, digit)
                                 time.sleep(1.5)
                 except Exception as e:
@@ -224,7 +231,7 @@ GLOBAL_BOT: Optional[MegaTensorBot] = None
 
 @app.route("/")
 def index():
-    return "Mega v5.0 Custom Clean Telegram Bot Active!", 200
+    return "Mega v5.0 Fixed & Optimized Bot Active!", 200
 
 @app.route("/health")
 def health():
