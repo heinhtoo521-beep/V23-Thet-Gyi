@@ -89,6 +89,15 @@ class MegaTensorBot:
         self.msg_queue = queue.Queue()
         self._start_telegram_worker()
 
+    def _get_bet_amount(self, step: int) -> int:
+        """Returns the specific bet size based on the user's custom ladder: 1000, 3000, 7000, then 0"""
+        bet_ladder = {
+            1: 1000,
+            2: 3000,
+            3: 7000
+        }
+        return bet_ladder.get(step, 0) # Steps beyond 3 will use 0 bet size
+
     def _start_telegram_worker(self):
         def worker():
             while True:
@@ -96,7 +105,7 @@ class MegaTensorBot:
                 if msg is None:
                     break
                 self._send_telegram_direct(msg)
-                time.sleep(0.5) # Ensuring precise ordering
+                time.sleep(0.5)
                 self.msg_queue.task_done()
         t = threading.Thread(target=worker, daemon=True)
         t.start()
@@ -143,7 +152,7 @@ class MegaTensorBot:
                         if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
                             self.engine.resolve(digit)
                             self.last_processed_period = period
-                    print(f"[Initializer] Successfully loaded {len(self.engine.long_buffer)} historical rounds instantly!", flush=True)
+                    print(f"[Initializer] Loaded {len(self.engine.long_buffer)} historical rounds!", flush=True)
                     self.is_initialized = True
         except Exception as e:
             print(f"[Init Error] {e}", flush=True)
@@ -152,9 +161,8 @@ class MegaTensorBot:
         with self.lock:
             try:
                 raw_int_period = int(period)
-                current_period_str = str(raw_int_period)[-3:]
             except Exception:
-                current_period_str = period
+                raw_int_period = 0
 
             if period == self.last_processed_period:
                 return
@@ -162,53 +170,38 @@ class MegaTensorBot:
 
             if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
                 self.engine.resolve(digit)
-                current_count = len(self.engine.long_buffer)
-                print(f"[Warming up...] {current_count} / {CONFIG['warmup_target']} (Period {period})", flush=True)
                 return
 
-            actual_outcome = "Small" if digit < 5 else "Big"
             actual_big = 1 if digit >= 5 else 0
-
-            win_rate = (self.total_wins / (self.total_wins + self.total_losses) * 100) if (self.total_wins + self.total_losses) > 0 else 97.5
 
             if self.last_decision and not self.last_decision.is_skipped:
                 last_won = ((1 if self.last_decision.signal == "BIG" else 0) == actual_big)
+                current_bet = self._get_bet_amount(self.current_step)
                 
-                # 1. Result message first
-                res_msg = (
-                    f"💖 {current_period_str} = {actual_outcome}\n"
-                    f"━━━━━━━━━━━━━━━━━\n"
-                    f"🤖 Bot Step: {self.current_step}x\n"
-                    f"💵 Profit: {self.current_profit:+,.0f}\n"
-                    f"🏆 Max Step: {self.max_step_reached}\n"
-                    f"📊 WR: {win_rate:.1f}%"
-                )
-                self.send_telegram_sync(res_msg)
-
-                # 2. Win message second (if won). If loss, omitted entirely as requested.
                 if last_won:
-                    profit = 1000 * CONFIG["payout_rate"]
-                    self.current_profit += profit
+                    # If bet was > 0, calculate profit. If bet was 0, profit change is 0.
+                    profit_val = current_bet * CONFIG["payout_rate"] if current_bet > 0 else 0
+                    self.current_profit += profit_val
                     self.total_wins += 1
                     
                     win_msg = (
-                        f"🔥 WIN ✅ (+{profit:,.0f})\n"
+                        f"🔥 WIN ✅ (+{profit_val:,.0f})\n"
                         f"🎯 Bet Success"
                     )
                     self.send_telegram_sync(win_msg)
-                    self.current_step = 1  # Reset to Step 1 on WIN
+                    self.current_step = 1  # Reset strictly to Step 1 (1000) on WIN
                 else:
-                    loss = 1000
-                    self.current_profit -= loss
+                    bet_loss = current_bet
+                    self.current_profit -= bet_loss
                     self.total_losses += 1
                     
-                    # Increment step on loss, max capped at 3
+                    # Increment step (1 -> 2 -> 3 -> 4 -> ...)
                     self.current_step += 1
-                    if self.current_step > 3:
-                        self.current_step = 1
 
                 if self.current_step > self.max_step_reached:
-                    self.max_step_reached = min(self.current_step, 3)
+                    self.max_step_reached = self.current_step
+
+            win_rate = (self.total_wins / (self.total_wins + self.total_losses) * 100) if (self.total_wins + self.total_losses) > 0 else 48.6
 
             self.engine.resolve(digit)
             decision = self.engine.predict(self.current_step)
@@ -218,15 +211,11 @@ class MegaTensorBot:
                 skip_msg = f"💕 Period {str(raw_int_period + 1)[-3:]} = SKIP 💕"
                 self.send_telegram_sync(skip_msg)
             else:
-                # Correctly incremented by +1 from API latest period
                 try:
                     target_period_str = str(raw_int_period + 1)[-3:]
                 except Exception:
                     target_period_str = "NXT"
 
-                display_max_step = min(self.max_step_reached, 3)
-
-                # 3. Next Signal message last
                 signal_msg = (
                     f"⚡⚡ [MEGA SIGNAL] \n"
                     f"━━━━━━━━━━━━━━━━━\n"
@@ -234,7 +223,7 @@ class MegaTensorBot:
                     f"🎯 SIGNAL → {decision.signal.upper()} 🔥\n"
                     f"━━━━━━━━━━━━━━━━━\n"
                     f"🤖 Bot Step: {self.current_step}x\n"
-                    f"🏆 Max Step: {display_max_step}\n"
+                    f"🏆 Max Step: {self.max_step_reached}\n"
                     f"💵 Profit: {self.current_profit:+,.0f}\n"
                     f"📊 WR: {win_rate:.1f}%"
                 )
@@ -244,7 +233,7 @@ class MegaTensorBot:
         def worker():
             print("[Mega v5.0 Bot] Initializing historical data...", flush=True)
             self.initialize_historical_data()
-            print("[Mega v5.0 Bot] Polling loop started with strict sequential flow...", flush=True)
+            print("[Mega v5.0 Bot] Polling loop started (Custom Bet Ladder)...", flush=True)
             
             headers = {
                 "accept": "application/json, text/plain, */*",
@@ -282,17 +271,20 @@ class MegaTensorBot:
 
 app = Flask(__name__)
 GLOBAL_BOT: Optional[MegaTensorBot] = None
+_bot_started = False
 
 @app.route("/")
 def index():
-    return "Mega v5.0 Sequential Flow Active!", 200
+    return "Mega v5.0 Custom Bet Ladder Active!", 200
 
 @app.route("/health")
 def health():
     return jsonify({"status": "healthy"}), 200
 
 if __name__ == "__main__":
-    GLOBAL_BOT = MegaTensorBot()
-    GLOBAL_BOT.start_polling_loop()
+    if not _bot_started:
+        _bot_started = True
+        GLOBAL_BOT = MegaTensorBot()
+        GLOBAL_BOT.start_polling_loop()
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port, threaded=True)
