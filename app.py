@@ -28,7 +28,7 @@ class MegaTensorDecision:
     elite_type: str
 
 class MegaPowerfulTensorEngine:
-    def __init__(self, short_window=8, long_window=30):  # Long window set strictly to 30
+    def __init__(self, short_window=8, long_window=30):
         self.short_buffer = deque(maxlen=short_window)
         self.long_buffer = deque(maxlen=long_window)
         self.last_bias = "BIG"
@@ -83,6 +83,7 @@ class MegaTensorBot:
         self.max_step_reached = 1
         self.last_decision: Optional[MegaTensorDecision] = None
         self.last_processed_period = None
+        self.is_initialized = False
 
     def send_telegram_sync(self, message: str):
         if not TELEGRAM_TOKEN or not CHAT_ID:
@@ -94,6 +95,41 @@ class MegaTensorBot:
             requests.post(url, json=payload, timeout=6)
         except Exception as e:
             print(f"[TG-ERR] {e}", flush=True)
+
+    def initialize_historical_data(self):
+        """Fetches a larger batch instantly to bypass slow warmup on restarts"""
+        headers = {
+            "accept": "application/json, text/plain, */*",
+            "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
+            "content-type": "application/json;charset=UTF-8",
+            "origin": "https://6win598.com",
+            "referer": "https://6win598.com/",
+            "user-agent": "Mozilla/5.0",
+        }
+        payload = {
+            "pageSize": 50, "pageNo": 1, "typeId": 30, "language": 7,
+            "random": "036263f367384d418be07465793c8da8",
+            "signature": "55F4FD150F15F090B943374F3C9BE78B",
+            "timestamp": int(time.time()),
+        }
+        try:
+            res = requests.post(CONFIG["api_url"], json=payload, headers=headers, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                list_data = data.get("data", {}).get("list", [])
+                if list_data:
+                    # Sort oldest to newest
+                    list_data.reverse()
+                    for item in list_data:
+                        period = str(item.get("issueNumber"))
+                        digit = int(item.get("number"))
+                        if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
+                            self.engine.resolve(digit)
+                            self.last_processed_period = period
+                    print(f"[Initializer] Successfully loaded {len(self.engine.long_buffer)} historical rounds instantly!", flush=True)
+                    self.is_initialized = True
+        except Exception as e:
+            print(f"[Init Error] {e}", flush=True)
 
     def process_round(self, period: str, digit: int):
         with self.lock:
@@ -109,7 +145,6 @@ class MegaTensorBot:
                 return
             self.last_processed_period = period
 
-            # Warmup Phase: Collect data silently without spamming Telegram
             if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
                 self.engine.resolve(digit)
                 current_count = len(self.engine.long_buffer)
@@ -183,7 +218,10 @@ class MegaTensorBot:
 
     def start_polling_loop(self):
         def worker():
-            print("[Mega v5.0 Bot] Polling started cleanly...", flush=True)
+            print("[Mega v5.0 Bot] Initializing historical data...", flush=True)
+            self.initialize_historical_data()
+            print("[Mega v5.0 Bot] Polling loop started...", flush=True)
+            
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
@@ -205,14 +243,12 @@ class MegaTensorBot:
                         data = res.json()
                         list_data = data.get("data", {}).get("list", [])
                         if list_data:
-                            # Reverse list data so we process from oldest to newest in batch during warmup if needed
-                            list_data.reverse()
-                            for latest in list_data:
-                                period = str(latest.get("issueNumber"))
-                                digit = int(latest.get("number"))
-                                if period != self.last_processed_period:
-                                    self.process_round(period, digit)
-                                    time.sleep(0.5)
+                            latest = list_data[0]
+                            period = str(latest.get("issueNumber"))
+                            digit = int(latest.get("number"))
+                            if period != self.last_processed_period:
+                                self.process_round(period, digit)
+                                time.sleep(1.5)
                 except Exception as e:
                     print(f"[Polling Error] {e}", flush=True)
                 time.sleep(CONFIG["poll_interval"])
@@ -225,7 +261,7 @@ GLOBAL_BOT: Optional[MegaTensorBot] = None
 
 @app.route("/")
 def index():
-    return "Mega v5.0 Silent Warmup & Clean Engine Active!", 200
+    return "Mega v5.0 Instant Initializer Active!", 200
 
 @app.route("/health")
 def health():
