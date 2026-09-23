@@ -28,7 +28,7 @@ class MegaTensorDecision:
     elite_type: str
 
 class MegaPowerfulTensorEngine:
-    def __init__(self, short_window=8, long_window=20):
+    def __init__(self, short_window=8, long_window=30):  # Long window set strictly to 30
         self.short_buffer = deque(maxlen=short_window)
         self.long_buffer = deque(maxlen=long_window)
         self.last_bias = "BIG"
@@ -105,18 +105,15 @@ class MegaTensorBot:
                 current_period_str = period
                 next_period_str = "NXT"
 
-            # Prevent duplicate processing of the same period
             if period == self.last_processed_period:
                 return
             self.last_processed_period = period
 
-            # Warmup Phase Handling (with anti-spam interval control)
+            # Warmup Phase: Collect data silently without spamming Telegram
             if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
                 self.engine.resolve(digit)
                 current_count = len(self.engine.long_buffer)
                 print(f"[Warming up...] {current_count} / {CONFIG['warmup_target']} (Period {period})", flush=True)
-                if current_count % 5 == 0 or current_count >= CONFIG["warmup_target"]:
-                    self.send_telegram_sync(f"📊 Mega v5.0 Warming up... [ {current_count} / {CONFIG['warmup_target']} ] (Period {next_period_str})")
                 return
 
             actual_outcome = "Small" if digit < 5 else "Big"
@@ -127,7 +124,6 @@ class MegaTensorBot:
             if self.last_decision and not self.last_decision.is_skipped:
                 last_won = ((1 if self.last_decision.signal == "BIG" else 0) == actual_big)
                 
-                # 1. Custom Result Message with WR included
                 res_msg = (
                     f"💖 {current_period_str} = {actual_outcome}\n"
                     f"━━━━━━━━━━━━━━━━━\n"
@@ -143,7 +139,6 @@ class MegaTensorBot:
                     self.current_profit += profit
                     self.total_wins += 1
                     
-                    # 2. Win Message
                     win_msg = (
                         f"🔥 WIN ✅ (+{profit:,.0f})\n"
                         f"🎯 Bet Success"
@@ -159,18 +154,15 @@ class MegaTensorBot:
                         self.current_step = 1
                     if self.current_step > self.max_step_reached:
                         self.max_step_reached = self.current_step
-                    # Loss messages are completely omitted as instructed.
 
             self.engine.resolve(digit)
             decision = self.engine.predict(self.current_step)
             self.last_decision = decision
 
             if decision.is_skipped:
-                # 3. Skip Message
                 skip_msg = f"💕 Period {next_period_str} = SKIP 💕"
                 self.send_telegram_sync(skip_msg)
             else:
-                # 4. Mega Signal Message with period incremented properly
                 try:
                     target_period_str = str(int(period) + 2)[-3:]
                 except Exception:
@@ -191,7 +183,7 @@ class MegaTensorBot:
 
     def start_polling_loop(self):
         def worker():
-            print("[Mega v5.0 Bot] Polling started with bugfixes & custom templates...", flush=True)
+            print("[Mega v5.0 Bot] Polling started cleanly...", flush=True)
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
@@ -213,12 +205,14 @@ class MegaTensorBot:
                         data = res.json()
                         list_data = data.get("data", {}).get("list", [])
                         if list_data:
-                            latest = list_data[0]
-                            period = str(latest.get("issueNumber"))
-                            digit = int(latest.get("number"))
-                            if period != self.last_processed_period:
-                                self.process_round(period, digit)
-                                time.sleep(1.5)
+                            # Reverse list data so we process from oldest to newest in batch during warmup if needed
+                            list_data.reverse()
+                            for latest in list_data:
+                                period = str(latest.get("issueNumber"))
+                                digit = int(latest.get("number"))
+                                if period != self.last_processed_period:
+                                    self.process_round(period, digit)
+                                    time.sleep(0.5)
                 except Exception as e:
                     print(f"[Polling Error] {e}", flush=True)
                 time.sleep(CONFIG["poll_interval"])
@@ -231,7 +225,7 @@ GLOBAL_BOT: Optional[MegaTensorBot] = None
 
 @app.route("/")
 def index():
-    return "Mega v5.0 Fixed & Optimized Bot Active!", 200
+    return "Mega v5.0 Silent Warmup & Clean Engine Active!", 200
 
 @app.route("/health")
 def health():
