@@ -4,6 +4,7 @@ import time
 import os
 import requests
 import threading
+import queue
 from collections import deque
 from dataclasses import dataclass
 from typing import Optional
@@ -84,8 +85,26 @@ class MegaTensorBot:
         self.last_decision: Optional[MegaTensorDecision] = None
         self.last_processed_period = None
         self.is_initialized = False
+        
+        self.msg_queue = queue.Queue()
+        self._start_telegram_worker()
+
+    def _start_telegram_worker(self):
+        def worker():
+            while True:
+                msg = self.msg_queue.get()
+                if msg is None:
+                    break
+                self._send_telegram_direct(msg)
+                time.sleep(0.5) # Ensuring precise ordering
+                self.msg_queue.task_done()
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
 
     def send_telegram_sync(self, message: str):
+        self.msg_queue.put(message)
+
+    def _send_telegram_direct(self, message: str):
         if not TELEGRAM_TOKEN or not CHAT_ID:
             print(f"[TG-LOCAL]\n{message}", flush=True)
             return
@@ -97,7 +116,6 @@ class MegaTensorBot:
             print(f"[TG-ERR] {e}", flush=True)
 
     def initialize_historical_data(self):
-        """Fetches a larger batch instantly to bypass slow warmup on restarts"""
         headers = {
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
@@ -118,7 +136,6 @@ class MegaTensorBot:
                 data = res.json()
                 list_data = data.get("data", {}).get("list", [])
                 if list_data:
-                    # Sort oldest to newest
                     list_data.reverse()
                     for item in list_data:
                         period = str(item.get("issueNumber"))
@@ -136,10 +153,8 @@ class MegaTensorBot:
             try:
                 raw_int_period = int(period)
                 current_period_str = str(raw_int_period)[-3:]
-                next_period_str = str(raw_int_period + 1)[-3:]
             except Exception:
                 current_period_str = period
-                next_period_str = "NXT"
 
             if period == self.last_processed_period:
                 return
@@ -159,6 +174,7 @@ class MegaTensorBot:
             if self.last_decision and not self.last_decision.is_skipped:
                 last_won = ((1 if self.last_decision.signal == "BIG" else 0) == actual_big)
                 
+                # 1. Result message first
                 res_msg = (
                     f"💖 {current_period_str} = {actual_outcome}\n"
                     f"━━━━━━━━━━━━━━━━━\n"
@@ -169,6 +185,7 @@ class MegaTensorBot:
                 )
                 self.send_telegram_sync(res_msg)
 
+                # 2. Win message second (if won). If loss, omitted entirely as requested.
                 if last_won:
                     profit = 1000 * CONFIG["payout_rate"]
                     self.current_profit += profit
@@ -179,30 +196,37 @@ class MegaTensorBot:
                         f"🎯 Bet Success"
                     )
                     self.send_telegram_sync(win_msg)
-                    self.current_step = 1
+                    self.current_step = 1  # Reset to Step 1 on WIN
                 else:
                     loss = 1000
                     self.current_profit -= loss
                     self.total_losses += 1
+                    
+                    # Increment step on loss, max capped at 3
                     self.current_step += 1
                     if self.current_step > 3:
                         self.current_step = 1
-                    if self.current_step > self.max_step_reached:
-                        self.max_step_reached = self.current_step
+
+                if self.current_step > self.max_step_reached:
+                    self.max_step_reached = min(self.current_step, 3)
 
             self.engine.resolve(digit)
             decision = self.engine.predict(self.current_step)
             self.last_decision = decision
 
             if decision.is_skipped:
-                skip_msg = f"💕 Period {next_period_str} = SKIP 💕"
+                skip_msg = f"💕 Period {str(raw_int_period + 1)[-3:]} = SKIP 💕"
                 self.send_telegram_sync(skip_msg)
             else:
+                # Correctly incremented by +1 from API latest period
                 try:
-                    target_period_str = str(int(period) + 2)[-3:]
+                    target_period_str = str(raw_int_period + 1)[-3:]
                 except Exception:
-                    target_period_str = next_period_str
+                    target_period_str = "NXT"
 
+                display_max_step = min(self.max_step_reached, 3)
+
+                # 3. Next Signal message last
                 signal_msg = (
                     f"⚡⚡ [MEGA SIGNAL] \n"
                     f"━━━━━━━━━━━━━━━━━\n"
@@ -210,7 +234,7 @@ class MegaTensorBot:
                     f"🎯 SIGNAL → {decision.signal.upper()} 🔥\n"
                     f"━━━━━━━━━━━━━━━━━\n"
                     f"🤖 Bot Step: {self.current_step}x\n"
-                    f"🏆 Max Step: {self.max_step_reached}\n"
+                    f"🏆 Max Step: {display_max_step}\n"
                     f"💵 Profit: {self.current_profit:+,.0f}\n"
                     f"📊 WR: {win_rate:.1f}%"
                 )
@@ -220,7 +244,7 @@ class MegaTensorBot:
         def worker():
             print("[Mega v5.0 Bot] Initializing historical data...", flush=True)
             self.initialize_historical_data()
-            print("[Mega v5.0 Bot] Polling loop started...", flush=True)
+            print("[Mega v5.0 Bot] Polling loop started with strict sequential flow...", flush=True)
             
             headers = {
                 "accept": "application/json, text/plain, */*",
@@ -261,7 +285,7 @@ GLOBAL_BOT: Optional[MegaTensorBot] = None
 
 @app.route("/")
 def index():
-    return "Mega v5.0 Instant Initializer Active!", 200
+    return "Mega v5.0 Sequential Flow Active!", 200
 
 @app.route("/health")
 def health():
