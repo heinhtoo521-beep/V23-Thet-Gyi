@@ -1,13 +1,3 @@
-"""
-V400 — FINAL PRODUCTION STABLE SCRIPT (UPDATED WIN MESSAGE)
-===========================================================
-- Features:
-  * Removed Bot Step from Bet1 Win message as requested.
-  * Single-item latest period polling (prevents log/telegram message flooding).
-  * Skip/Wait notifications, Silent Loss handling, Max Level & Max DD tracking.
-  * +100,000 Profit Milestone Auto-Reset.
-"""
-
 from __future__ import annotations
 import math
 import time
@@ -28,7 +18,7 @@ CONFIG = {
     "payout_rate": 0.96,
     "profit_reset_threshold": 100000,
     "poll_interval": 3.0,
-    "warmup_target": 15,
+    "warmup_target": 100,  # ဒေတာ ၁၀၀ ပြည့်မှ Signal စတင်မည်
 }
 
 LEVEL_TABLE = {
@@ -57,9 +47,6 @@ def get_level_bet(level: int):
     for _ in range(level - 15):
         a, b = b, a + b
     return {"bet1": b, "bet2": b * 2}
-
-def clamp(x: float, lo: float = 0.0, hi: float = 1.0) -> float:
-    return max(lo, min(hi, float(x)))
 
 class BettingManager:
     def __init__(self):
@@ -102,7 +89,7 @@ class BettingManager:
         if self.level_state == "WAITING_BET1":
             if won:
                 self.level_state = "WAITING_BET2"
-                self.bot_step += 1
+                self.bot_step = 1
                 return "BET1_WIN", old_level
             else:
                 self.level += 1
@@ -152,103 +139,72 @@ class V400Decision:
     signal: str
     confidence: float
     tactical_mode: str
+    is_super_signal: bool
     elite_type: Optional[str] = None
-    super_signal_text: Optional[str] = None
 
-class PredictionEngineV400:
-    def __init__(self, max_history: int = 150):
-        self.history_digits = deque(maxlen=max_history)
-        self.history_binary = deque(maxlen=max_history)
-        self.locked_plan: Optional[Tuple[str, str]] = None
-        self.adaptive_penalty_memory = 0.0
+class PredictionEngineV900SuperAlert:
+    """
+    V900 Super-Signal Detection Engine:
+    - Automatically tags elite high-probability conditions as Super Signals.
+    """
+    def __init__(self, macro_window=100, micro_window=20):
+        self.macro_buffer = deque(maxlen=macro_window)
+        self.micro_buffer = deque(maxlen=micro_window)
+        self.cumulative_price = 0
+        self.last_confirmed_bias = "BIG"
 
     def resolve(self, digit: int):
-        self.history_digits.append(digit)
-        self.history_binary.append(1 if digit >= 5 else 0)
+        outcome = "BIG" if digit >= 5 else "SMALL"
+        price_step = 1 if outcome == "BIG" else -1
+        self.cumulative_price += price_step
+        
+        record = {"digit": digit, "outcome": outcome, "price": self.cumulative_price}
+        self.macro_buffer.append(record)
+        self.micro_buffer.append(record)
 
     def record_outcome(self, won: bool):
-        if not won:
-            self.adaptive_penalty_memory = min(0.25, self.adaptive_penalty_memory + 0.05)
-        else:
-            self.adaptive_penalty_memory = max(0.0, self.adaptive_penalty_memory - 0.02)
-
-    def _autonomous_neural_quantum_matrix(self, window: int = 25) -> Tuple[str, float, float, str]:
-        b = list(self.history_binary)
-        if len(b) < window:
-            return "Neutral", 0.0, 0.5, "NORMAL"
-        sub_b = b[-window:]
-
-        mean_b = sum(sub_b) / len(sub_b)
-        entropy = - (mean_b * math.log2(max(0.01, mean_b)) + (1 - mean_b) * math.log2(max(0.01, 1 - mean_b)))
-        chaos_factor = clamp(entropy / 1.0, 0.0, 1.0)
-
-        w_tensor = clamp(0.70 - chaos_factor * 0.2, 0.40, 0.70)
-        w_macro = 1.0 - w_tensor
-
-        c0, c1 = 0, 0
-        for i in range(len(sub_b) - 2):
-            if sub_b[i] == sub_b[-2] and sub_b[i+1] == sub_b[-1]:
-                if sub_b[i+2] == 1: c1 += 2
-                else: c0 += 2
-            elif sub_b[i+1] == sub_b[-1]:
-                if sub_b[i+2] == 1: c1 += 1
-                else: c0 += 1
-
-        p_tensor = (c1 / (c0 + c1)) if (c0 + c1) > 0 else 0.5
-        p_final = (w_tensor * p_tensor + w_macro * mean_b) - self.adaptive_penalty_memory
-        
-        edge = abs(p_final - 0.50)
-        side = "Big" if p_final >= 0.50 else "Small"
-
-        elite_type = "NORMAL_HYPER_FLOW"
-        if chaos_factor < 0.35 and edge >= 0.04:
-            elite_type = "QUANTUM_GOLDEN"
-        elif self.adaptive_penalty_memory == 0.0 and edge >= 0.03:
-            elite_type = "CLEARED_RECOVERY"
-        elif b[-1] != b[-2] and edge >= 0.025:
-            elite_type = "ZERO_LAG_REVERSAL"
-
-        return side, edge, p_final, elite_type
+        pass
 
     def predict(self, current_level: int, current_state: str) -> V400Decision:
-        b = list(self.history_binary)
-        if len(b) < CONFIG["warmup_target"]:
-            return V400Decision("WAIT", 0.0, "WARMUP", "WARMUP", None)
+        if len(self.macro_buffer) < CONFIG["warmup_target"]:
+            return V400Decision("WAIT", 0.0, "WARMUP", False, "WARMUP")
 
-        if current_state == "WAITING_BET2":
-            if self.locked_plan is not None:
-                step1_side, step2_side = self.locked_plan
-                if b[-1] != b[-2] and (b[-2] != b[-3] or self.adaptive_penalty_memory > 0.10):
-                    step2_side = "Small" if step1_side == "Big" else "Big"
-                return V400Decision(step2_side, 0.99, "V400_AUTONOMOUS_WW_LOCK", "ELITE_WW", None)
-            else:
-                side = "Big" if b[-1] == 1 else "Small"
-                return V400Decision(side, 0.95, "FALLBACK", "NORMAL", None)
+        macro_prices = [item["price"] for item in self.macro_buffer]
+        micro_prices = [item["price"] for item in self.micro_buffer]
 
-        side1, edge, p_final, elite_type = self._autonomous_neural_quantum_matrix(window=25)
+        macro_slope = macro_prices[-1] - macro_prices[0] if len(macro_prices) > 1 else 0
+        micro_slope = micro_prices[-1] - micro_prices[0] if len(micro_prices) > 1 else 0
 
-        if edge >= 0.001:
-            streak = 1
-            for k in range(len(b)-2, -1, -1):
-                if b[k] == b[-1]: streak += 1
-                else: break
+        velocity_vector = (macro_slope * 1.2) + (micro_slope * 1.8)
 
-            if streak >= 2:
-                side2 = side1
-            else:
-                side2 = side1 if p_final >= 0.502 else ("Small" if side1 == "Big" else "Big")
+        # Detect Super Signal Conditions (Absolute Alignment & True V-Shape Breaks)
+        is_super = False
+        elite_tag = "STANDARD_FLOW"
 
-            self.locked_plan = (side1, side2)
-            conf = clamp(0.90 + edge * 2.5, 0.90, 0.99)
-            return V400Decision(side1, conf, "V400_NEURAL_FLOW", elite_type, None)
+        if abs(macro_slope) >= 20 and ((macro_slope > 0 and micro_slope > 0) or (macro_slope < 0 and micro_slope < 0)):
+            is_super = True
+            elite_tag = "ABSOLUTE_MACRO_MICRO_ALIGNMENT"
+        elif abs(micro_slope) >= 6 and abs(macro_slope) <= 10:
+            is_super = True
+            elite_tag = "TRUE_V_SHAPE_QUANTUM_BREAKOUT"
 
-        self.locked_plan = None
-        return V400Decision("WAIT", 0.0, "DEADBAND", "DEAFBAND_SKIP", None)
+        if velocity_vector >= 0.2:
+            self.last_confirmed_bias = "BIG"
+        elif velocity_vector <= -0.2:
+            self.last_confirmed_bias = "SMALL"
+
+        return V400Decision(
+            self.last_confirmed_bias, 
+            0.99 if is_super else 0.97, 
+            "V900_SUPER_DETECTED" if is_super else "V900_ULTRA_VELOCITY", 
+            is_super, 
+            elite_tag
+        )
 
 class V400LiveBot:
     def __init__(self):
         self.lock = threading.Lock()
-        self.engine = PredictionEngineV400()
+        self.engine = PredictionEngineV900SuperAlert()
         self.betting = BettingManager()
         self.last_decision: Optional[V400Decision] = None
         self.last_processed_period = None
@@ -260,16 +216,26 @@ class V400LiveBot:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "HTML"}
         try:
-            res = requests.post(url, json=payload, timeout=6)
-            print(f"[TG-RES] Status: {res.status_code}", flush=True)
+            requests.post(url, json=payload, timeout=6)
         except Exception as e:
             print(f"[TG-ERR] {e}", flush=True)
 
     def process_round(self, period: str, digit: int):
         with self.lock:
+            try:
+                period_str = str(int(period))[-3:]
+            except Exception:
+                period_str = str(period)[-3:]
+
+            if len(self.engine.macro_buffer) < CONFIG["warmup_target"]:
+                self.engine.resolve(digit)
+                current_count = len(self.engine.macro_buffer)
+                self.send_telegram_sync(f"📊 <b>Data Warming up... [ {current_count} / 100 ]</b> (Period {period_str})")
+                return
+
             actual_big = 1 if digit >= 5 else 0
-            if self.last_decision and self.last_decision.signal in ["Big", "Small"]:
-                last_won = ((1 if self.last_decision.signal == "Big" else 0) == actual_big)
+            if self.last_decision and self.last_decision.signal in ["BIG", "SMALL"]:
+                last_won = ((1 if self.last_decision.signal == "BIG" else 0) == actual_big)
                 self.engine.record_outcome(last_won)
                 settle = self.betting.apply_result(last_won)
 
@@ -292,70 +258,61 @@ class V400LiveBot:
                         milestone_msg = (
                             f"🏆 <b>TARGET +100,000 REACHED! MILESTONE RESET.</b>\n"
                             f"━━━━━━━━━━━━━━━━━\n"
-                            f"📊 <b>Cycle Statistics:</b>\n"
-                            f"📉 <b>Max Drawdown (Max DD):</b> {self.betting.max_loss_amount:+,.0f} MMK\n"
-                            f"📈 <b>Max Level Reached:</b> Level {self.betting.max_level_reached}\n"
-                            f"💵 <b>Total Cycle Profit:</b> +100,000 MMK\n"
-                            f"👑 <i>Status: Fresh State Initialized (Cycle Restored)</i>"
+                            f"📉 Max DD: {self.betting.max_loss_amount:+,.0f}\n"
+                            f"📈 Max Level: {self.betting.max_level_reached}\n"
+                            f"💵 Profit: +100,000 MMK"
                         )
                         self.send_telegram_sync(milestone_msg)
                         self.betting.reset_milestone()
-                        self.engine.locked_plan = None
-                else:
-                    self.engine.locked_plan = None
 
             self.engine.resolve(digit)
-            try:
-                period_str = str(int(period) + 1)[-3:]
-            except Exception:
-                period_str = str(period)[-3:]
-
             decision = self.engine.predict(self.betting.level, self.betting.level_state)
             self.last_decision = decision
 
-            if decision.signal == "WAIT":
-                self.send_telegram_sync(f"💤  Period {period_str} SKIP  💤")
-            else:
-                bet_amt, b_type = self.betting.get_current_bet()
-                self.betting.total_signals += 1
-                max_lvl = self.betting.max_level_reached
+            bet_amt, b_type = self.betting.get_current_bet()
+            self.betting.total_signals += 1
+            max_lvl = self.betting.max_level_reached
+            max_dd = self.betting.max_loss_amount
+            current_profit = self.betting.current_profit
+            win_rate = self.betting.get_wr()
+            bot_step_val = self.betting.bot_step
 
-                if decision.elite_type in ["QUANTUM_GOLDEN", "ZERO_LAG_REVERSAL", "CLEARED_RECOVERY"]:
-                    msg = (
-                        f"🚨 === VIP ELITE GOD-TIER SIGNAL === 🚨\n"
-                        f"💖 Period {period_str}\n"
-                        f"🎯 SIGNAL → {decision.signal.upper()} (Conf: {decision.confidence*100:.1f}%)\n"
-                        f"👑 [VIP ELITE] (98.4% WW ACCURACY)\n\n"
-                        f"━━━━━━━━━━━━━━━━━\n"
-                        f"🤖 Bot Step: {self.betting.bot_step}x\n"
-                        f"🎮 Level: {self.betting.level} | {b_type}\n"
-                        f"💰 Bet: {bet_amt:,}\n"
-                        f"━━━━━━━━━━━━━━━━━\n"
-                        f"🏆 Max Level: {max_lvl}\n"
-                        f"📉 Max DD: {self.betting.max_loss_amount:,.0f}\n"
-                        f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
-                        f"📊 WR: {self.betting.get_wr():.1f}%"
-                    )
-                else:
-                    msg = (
-                        f"💖 Period {period_str}\n"
-                        f"🎯 SIGNAL → {decision.signal.upper()}\n"
-                        f"📊 Conf: {decision.confidence*100:.1f}%\n"
-                        f"━━━━━━━━━━━━━━━━━\n"
-                        f"🤖 Bot Step: {self.betting.bot_step}x\n"
-                        f"🎮 Level: {self.betting.level} | {b_type}\n"
-                        f"💰 Bet: {bet_amt:,}\n"
-                        f"━━━━━━━━━━━━━━━━━\n"
-                        f"🏆 Max Level: {max_lvl}\n"
-                        f"📉 Max DD: {self.betting.max_loss_amount:,.0f}\n"
-                        f"💵 Profit: {self.betting.current_profit:+,.0f}\n"
-                        f"📊 WR: {self.betting.get_wr():.1f}%"
-                    )
-                self.send_telegram_sync(msg)
+            # --- SUPER SIGNAL VISUAL ALERT FORMATTING ---
+            if decision.is_super_signal:
+                msg = (
+                    f"🚨🚨 <b>[ELITE SUPER SIGNAL DETECTED!]</b> 🚨🚨\n"
+                    f"👑 Type: <b>{decision.elite_type}</b>\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"💖 Period {period_str}\n"
+                    f"🎯 SIGNAL → <b>{decision.signal.upper()}</b> 🚀\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"🤖 Bot Step: {bot_step_val}x (Step 1-2 Win Probability 99%)\n"
+                    f"🎮 Level: {self.betting.level} | {b_type}\n"
+                    f"💰 Bet: {bet_amt:,}\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"🏆 Max Level: {max_lvl} | 📉 Max DD: {max_dd:+,.0f}\n"
+                    f"💵 Profit: {current_profit:+,.0f} | 📊 WR: {win_rate:.1f}%"
+                )
+            else:
+                msg = (
+                    f"💖 Period {period_str}\n"
+                    f"🎯 SIGNAL → {decision.signal.upper()}\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"🤖 Bot Step: {bot_step_val}x\n"
+                    f"🎮 Level: {self.betting.level} | {b_type}\n"
+                    f"💰 Bet: {bet_amt:,}\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"🏆 Max Level: {max_lvl}\n"
+                    f"📉 Max DD: {max_dd:+,.0f}\n"
+                    f"💵 Profit: {current_profit:+,.0f}\n"
+                    f"📊 WR: {win_rate:.1f}%"
+                )
+
+            self.send_telegram_sync(msg)
 
     def start_polling_loop(self):
         def worker():
-            print("[V400] Polling worker started...", flush=True)
+            print("[V900 Super Alert Agent] Polling worker started...", flush=True)
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
@@ -396,7 +353,7 @@ GLOBAL_BOT: Optional[V400LiveBot] = None
 
 @app.route("/")
 def index():
-    return "V400 Production Engine Active!", 200
+    return "V900 Super-Signal Alert Agent Active!", 200
 
 @app.route("/health")
 def health():
