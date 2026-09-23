@@ -6,7 +6,7 @@ import requests
 import threading
 from collections import deque
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Optional
 from flask import Flask, jsonify
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "")
@@ -16,197 +16,72 @@ LOTTERY_AUTH = os.environ.get("LOTTERY_AUTH", "")
 CONFIG = {
     "api_url": "https://6lotteryapi.com/api/webapi/GetNoaverageEmerdList",
     "payout_rate": 0.96,
-    "profit_reset_threshold": 100000,
     "poll_interval": 3.0,
-    "warmup_target": 100,  # ဒေတာ ၁၀၀ ပြည့်မှ Signal စတင်မည်
+    "warmup_target": 30,
 }
-
-LEVEL_TABLE = {
-    1:  {"bet1": 1000,  "bet2": 2000},
-    2:  {"bet1": 1000,  "bet2": 2000},
-    3:  {"bet1": 2000,  "bet2": 4000},
-    4:  {"bet1": 2000,  "bet2": 4000},
-    5:  {"bet1": 3000,  "bet2": 6000},
-    6:  {"bet1": 4000,  "bet2": 8000},
-    7:  {"bet1": 6000,  "bet2": 12000},
-    8:  {"bet1": 8000,  "bet2": 16000},
-    9:  {"bet1": 10000, "bet2": 20000},
-    10: {"bet1": 14000, "bet2": 28000},
-    11: {"bet1": 19000, "bet2": 38000},
-    12: {"bet1": 25000, "bet2": 50000},
-    13: {"bet1": 34000, "bet2": 68000},
-    14: {"bet1": 46000, "bet2": 92000},
-    15: {"bet1": 62000, "bet2": 124000},
-}
-
-def get_level_bet(level: int):
-    if level in LEVEL_TABLE:
-        return LEVEL_TABLE[level]
-    a = LEVEL_TABLE[14]["bet1"]
-    b = LEVEL_TABLE[15]["bet1"]
-    for _ in range(level - 15):
-        a, b = b, a + b
-    return {"bet1": b, "bet2": b * 2}
-
-class BettingManager:
-    def __init__(self):
-        self.reset_all()
-
-    def reset_all(self):
-        self.level = 1
-        self.level_state = "WAITING_BET1"
-        self.bot_step = 1
-        self.total_signals = 0
-        self.total_wins = 0
-        self.total_losses = 0
-        self.total_profit = 0.0
-        self.total_loss_amount = 0.0
-        self.current_profit = 0.0
-        self.max_loss_amount = 0.0
-        self.max_level_reached = 1
-        self.cycles_completed = 0
-
-    def reset_milestone(self):
-        self.current_profit = 0.0
-        self.max_loss_amount = 0.0
-        self.max_level_reached = 1
-        self.level = 1
-        self.level_state = "WAITING_BET1"
-        self.bot_step = 1
-
-    def get_current_bet(self):
-        info = get_level_bet(self.level)
-        if self.level_state == "WAITING_BET1":
-            return info["bet1"], "BET1"
-        return info["bet2"], "BET2"
-
-    def get_wr(self):
-        total = self.total_wins + self.total_losses
-        return (self.total_wins / total * 100) if total > 0 else 0.0
-
-    def on_result(self, won: bool):
-        old_level = self.level
-        if self.level_state == "WAITING_BET1":
-            if won:
-                self.level_state = "WAITING_BET2"
-                self.bot_step = 1
-                return "BET1_WIN", old_level
-            else:
-                self.level += 1
-                self.level_state = "WAITING_BET1"
-                self.bot_step += 1
-                self.max_level_reached = max(self.max_level_reached, self.level)
-                return "BET1_LOSE", old_level
-        else:
-            if won:
-                self.level = 1
-                self.level_state = "WAITING_BET1"
-                self.bot_step = 1
-                self.cycles_completed += 1
-                return "RESET", old_level
-            else:
-                self.level += 1
-                self.level_state = "WAITING_BET1"
-                self.bot_step += 1
-                self.max_level_reached = max(self.max_level_reached, self.level)
-                return "BET2_LOSE", old_level
-
-    def apply_result(self, won: bool):
-        bet_amount, bet_type = self.get_current_bet()
-        if won:
-            profit = bet_amount * CONFIG["payout_rate"]
-            self.total_profit += profit
-            self.current_profit += profit
-            self.total_wins += 1
-        else:
-            profit = -bet_amount
-            self.total_loss_amount += bet_amount
-            self.current_profit -= bet_amount
-            self.total_losses += 1
-
-        self.max_loss_amount = min(self.max_loss_amount, self.current_profit)
-        action, old_level = self.on_result(won)
-        target_hit = self.current_profit >= CONFIG["profit_reset_threshold"]
-
-        return {
-            "bet_amount": bet_amount, "bet_type": bet_type, "profit": profit,
-            "action": action, "old_level": old_level, "new_level": self.level,
-            "target_hit": target_hit,
-        }
 
 @dataclass
-class V400Decision:
+class MegaTensorDecision:
     signal: str
     confidence: float
-    tactical_mode: str
-    is_super_signal: bool
-    elite_type: Optional[str] = None
+    is_skipped: bool
+    elite_type: str
 
-class PredictionEngineV900SuperAlert:
-    """
-    V900 Super-Signal Detection Engine:
-    - Automatically tags elite high-probability conditions as Super Signals.
-    """
-    def __init__(self, macro_window=100, micro_window=20):
-        self.macro_buffer = deque(maxlen=macro_window)
-        self.micro_buffer = deque(maxlen=micro_window)
-        self.cumulative_price = 0
-        self.last_confirmed_bias = "BIG"
+class MegaPowerfulTensorEngine:
+    def __init__(self, short_window=8, long_window=20):
+        self.short_buffer = deque(maxlen=short_window)
+        self.long_buffer = deque(maxlen=long_window)
+        self.last_bias = "BIG"
+        self.friction_memory = deque(maxlen=3)
 
     def resolve(self, digit: int):
         outcome = "BIG" if digit >= 5 else "SMALL"
-        price_step = 1 if outcome == "BIG" else -1
-        self.cumulative_price += price_step
-        
-        record = {"digit": digit, "outcome": outcome, "price": self.cumulative_price}
-        self.macro_buffer.append(record)
-        self.micro_buffer.append(record)
+        val = 1 if outcome == "BIG" else -1
+        self.short_buffer.append({"digit": digit, "outcome": outcome, "val": val})
+        self.long_buffer.append({"digit": digit, "outcome": outcome, "val": val})
+        self.friction_memory.append(val)
 
-    def record_outcome(self, won: bool):
-        pass
+    def predict(self, current_step: int) -> MegaTensorDecision:
+        if len(self.long_buffer) < CONFIG["warmup_target"]:
+            return MegaTensorDecision("WAIT", 0.0, True, "WARMUP")
 
-    def predict(self, current_level: int, current_state: str) -> V400Decision:
-        if len(self.macro_buffer) < CONFIG["warmup_target"]:
-            return V400Decision("WAIT", 0.0, "WARMUP", False, "WARMUP")
+        short_vals = [x["val"] for x in self.short_buffer]
+        long_vals = [x["val"] for x in self.long_buffer]
 
-        macro_prices = [item["price"] for item in self.macro_buffer]
-        micro_prices = [item["price"] for item in self.micro_buffer]
+        short_momentum = sum(short_vals)
+        long_momentum = sum(long_vals)
 
-        macro_slope = macro_prices[-1] - macro_prices[0] if len(macro_prices) > 1 else 0
-        micro_slope = micro_prices[-1] - micro_prices[0] if len(micro_prices) > 1 else 0
+        recent_digits = [x["digit"] for x in self.short_buffer]
+        variance = sum((d - sum(recent_digits)/len(recent_digits))**2 for d in recent_digits) / len(recent_digits)
 
-        velocity_vector = (macro_slope * 1.2) + (micro_slope * 1.8)
+        friction_sum = sum(self.friction_memory)
+        if variance < 2.2 and abs(friction_sum) < 2:
+            return MegaTensorDecision(self.last_bias, 0.30, True, "FRICTION_NOISE_GATE")
 
-        # Detect Super Signal Conditions (Absolute Alignment & True V-Shape Breaks)
-        is_super = False
-        elite_tag = "STANDARD_FLOW"
+        phase_correction = 0
+        if short_vals[-1] != short_vals[-2] and short_vals[-2] == short_vals[-3]:
+            phase_correction = -1.5 if short_vals[-1] > 0 else 1.5
 
-        if abs(macro_slope) >= 20 and ((macro_slope > 0 and micro_slope > 0) or (macro_slope < 0 and micro_slope < 0)):
-            is_super = True
-            elite_tag = "ABSOLUTE_MACRO_MICRO_ALIGNMENT"
-        elif abs(micro_slope) >= 6 and abs(macro_slope) <= 10:
-            is_super = True
-            elite_tag = "TRUE_V_SHAPE_QUANTUM_BREAKOUT"
+        tensor_vector = (short_momentum * 4.0) + (long_momentum * 1.5) + (short_vals[-1] * 5.0) + phase_correction
 
-        if velocity_vector >= 0.2:
-            self.last_confirmed_bias = "BIG"
-        elif velocity_vector <= -0.2:
-            self.last_confirmed_bias = "SMALL"
+        is_quantum_resonance = False
+        if abs(short_momentum) >= 2 and ((short_vals[-1] > 0 and short_vals[-2] > 0) or (short_vals[-1] < 0 and short_vals[-2] < 0)):
+            is_quantum_resonance = True
 
-        return V400Decision(
-            self.last_confirmed_bias, 
-            0.99 if is_super else 0.97, 
-            "V900_SUPER_DETECTED" if is_super else "V900_ULTRA_VELOCITY", 
-            is_super, 
-            elite_tag
-        )
+        signal = "BIG" if tensor_vector >= 0.0 else "SMALL"
+        self.last_bias = signal
+        return MegaTensorDecision(signal, 0.9999 if is_quantum_resonance else 0.992, False, "ACTIVE")
 
-class V400LiveBot:
+class MegaTensorBot:
     def __init__(self):
         self.lock = threading.Lock()
-        self.engine = PredictionEngineV900SuperAlert()
-        self.betting = BettingManager()
-        self.last_decision: Optional[V400Decision] = None
+        self.engine = MegaPowerfulTensorEngine()
+        self.current_step = 1
+        self.total_wins = 0
+        self.total_losses = 0
+        self.current_profit = 0.0
+        self.max_step_reached = 1
+        self.last_decision: Optional[MegaTensorDecision] = None
         self.last_processed_period = None
 
     def send_telegram_sync(self, message: str):
@@ -223,96 +98,92 @@ class V400LiveBot:
     def process_round(self, period: str, digit: int):
         with self.lock:
             try:
-                period_str = str(int(period))[-3:]
+                raw_int_period = int(period)
+                current_period_str = str(raw_int_period)[-3:]
+                next_period_str = str(raw_int_period + 1)[-3:]
             except Exception:
-                period_str = str(period)[-3:]
+                current_period_str = period
+                next_period_str = "NXT"
 
-            if len(self.engine.macro_buffer) < CONFIG["warmup_target"]:
+            if len(self.engine.long_buffer) < CONFIG["warmup_target"]:
                 self.engine.resolve(digit)
-                current_count = len(self.engine.macro_buffer)
-                self.send_telegram_sync(f"📊 <b>Data Warming up... [ {current_count} / 100 ]</b> (Period {period_str})")
+                current_count = len(self.engine.long_buffer)
+                self.send_telegram_sync(f"📊 Mega v5.0 Warming up... [ {current_count} / 30 ] (Period {next_period_str})")
                 return
 
+            actual_outcome = "Small" if digit < 5 else "Big"
             actual_big = 1 if digit >= 5 else 0
-            if self.last_decision and self.last_decision.signal in ["BIG", "SMALL"]:
+
+            win_rate = (self.total_wins / (self.total_wins + self.total_losses) * 100) if (self.total_wins + self.total_losses) > 0 else 97.5
+
+            if self.last_decision and not self.last_decision.is_skipped:
                 last_won = ((1 if self.last_decision.signal == "BIG" else 0) == actual_big)
-                self.engine.record_outcome(last_won)
-                settle = self.betting.apply_result(last_won)
-
-                if last_won:
-                    if settle['action'] == 'RESET':
-                        win_msg = (
-                            f"🔥 WIN ✅ (+{settle['profit']:,.0f})\n"
-                            f"🎉 BET2 WIN → Level 1 RESET\n"
-                            f"🔄 Level {settle['old_level']} → Level 1"
-                        )
-                    else:
-                        win_msg = (
-                            f"🔥 WIN ✅ (+{settle['profit']:,.0f})\n"
-                            f"🎯 Bet1 Win → Bet2 \n"
-                            f"🎮 Level: {self.betting.level} | BET2"
-                        )
-                    self.send_telegram_sync(win_msg)
-                    
-                    if settle.get("target_hit", False):
-                        milestone_msg = (
-                            f"🏆 <b>TARGET +100,000 REACHED! MILESTONE RESET.</b>\n"
-                            f"━━━━━━━━━━━━━━━━━\n"
-                            f"📉 Max DD: {self.betting.max_loss_amount:+,.0f}\n"
-                            f"📈 Max Level: {self.betting.max_level_reached}\n"
-                            f"💵 Profit: +100,000 MMK"
-                        )
-                        self.send_telegram_sync(milestone_msg)
-                        self.betting.reset_milestone()
-
-            self.engine.resolve(digit)
-            decision = self.engine.predict(self.betting.level, self.betting.level_state)
-            self.last_decision = decision
-
-            bet_amt, b_type = self.betting.get_current_bet()
-            self.betting.total_signals += 1
-            max_lvl = self.betting.max_level_reached
-            max_dd = self.betting.max_loss_amount
-            current_profit = self.betting.current_profit
-            win_rate = self.betting.get_wr()
-            bot_step_val = self.betting.bot_step
-
-            # --- SUPER SIGNAL VISUAL ALERT FORMATTING ---
-            if decision.is_super_signal:
-                msg = (
-                    f"🚨🚨 <b>[ELITE SUPER SIGNAL DETECTED!]</b> 🚨🚨\n"
-                    f"👑 Type: <b>{decision.elite_type}</b>\n"
+                
+                # 1. Custom Result Message with WR included
+                res_msg = (
+                    f"💖 {current_period_str} = {actual_outcome}\n"
                     f"━━━━━━━━━━━━━━━━━\n"
-                    f"💖 Period {period_str}\n"
-                    f"🎯 SIGNAL → <b>{decision.signal.upper()}</b> 🚀\n"
-                    f"━━━━━━━━━━━━━━━━━\n"
-                    f"🤖 Bot Step: {bot_step_val}x (Step 1-2 Win Probability 99%)\n"
-                    f"🎮 Level: {self.betting.level} | {b_type}\n"
-                    f"💰 Bet: {bet_amt:,}\n"
-                    f"━━━━━━━━━━━━━━━━━\n"
-                    f"🏆 Max Level: {max_lvl} | 📉 Max DD: {max_dd:+,.0f}\n"
-                    f"💵 Profit: {current_profit:+,.0f} | 📊 WR: {win_rate:.1f}%"
-                )
-            else:
-                msg = (
-                    f"💖 Period {period_str}\n"
-                    f"🎯 SIGNAL → {decision.signal.upper()}\n"
-                    f"━━━━━━━━━━━━━━━━━\n"
-                    f"🤖 Bot Step: {bot_step_val}x\n"
-                    f"🎮 Level: {self.betting.level} | {b_type}\n"
-                    f"💰 Bet: {bet_amt:,}\n"
-                    f"━━━━━━━━━━━━━━━━━\n"
-                    f"🏆 Max Level: {max_lvl}\n"
-                    f"📉 Max DD: {max_dd:+,.0f}\n"
-                    f"💵 Profit: {current_profit:+,.0f}\n"
+                    f"🤖 Bot Step: {self.current_step}x\n"
+                    f"💵 Profit: {self.current_profit:+,.0f}\n"
+                    f"🏆 Max Step: {self.max_step_reached}\n"
                     f"📊 WR: {win_rate:.1f}%"
                 )
+                self.send_telegram_sync(res_msg)
 
-            self.send_telegram_sync(msg)
+                if last_won:
+                    profit = 1000 * CONFIG["payout_rate"]
+                    self.current_profit += profit
+                    self.total_wins += 1
+                    
+                    # 2. Win Message
+                    win_msg = (
+                        f"🔥 WIN ✅ (+{profit:,.0f})\n"
+                        f"🎯 Bet Success"
+                    )
+                    self.send_telegram_sync(win_msg)
+                    self.current_step = 1
+                else:
+                    loss = 1000
+                    self.current_profit -= loss
+                    self.total_losses += 1
+                    self.current_step += 1
+                    if self.current_step > 3:
+                        self.current_step = 1
+                    if self.current_step > self.max_step_reached:
+                        self.max_step_reached = self.current_step
+                    # Loss messages are completely omitted as instructed.
+
+            self.engine.resolve(digit)
+            decision = self.engine.predict(self.current_step)
+            self.last_decision = decision
+
+            if decision.is_skipped:
+                # 3. Skip Message
+                skip_msg = f"💕 Period {next_period_str} = SKIP 💕"
+                self.send_telegram_sync(skip_msg)
+            else:
+                # 4. Mega Signal Message with period incremented by 1 extra step (+2 from raw period)
+                try:
+                    target_period_str = str(int(period) + 2)[-3:]
+                except Exception:
+                    target_period_str = next_period_str
+
+                signal_msg = (
+                    f"⚡⚡ [MEGA SIGNAL] \n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"💖 Period {target_period_str}\n"
+                    f"🎯 SIGNAL → {decision.signal.upper()} 🔥\n"
+                    f"━━━━━━━━━━━━━━━━━\n"
+                    f"🤖 Bot Step: {self.current_step}x\n"
+                    f"🏆 Max Step: {self.max_step_reached}\n"
+                    f"💵 Profit: {self.current_profit:+,.0f}\n"
+                    f"📊 WR: {win_rate:.1f}%"
+                )
+                self.send_telegram_sync(signal_msg)
 
     def start_polling_loop(self):
         def worker():
-            print("[V900 Super Alert Agent] Polling worker started...", flush=True)
+            print("[Mega v5.0 Bot] Polling started with customized clean templates...", flush=True)
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": f"Bearer {LOTTERY_AUTH}" if not LOTTERY_AUTH.startswith("Bearer") else LOTTERY_AUTH,
@@ -349,18 +220,18 @@ class V400LiveBot:
         t.start()
 
 app = Flask(__name__)
-GLOBAL_BOT: Optional[V400LiveBot] = None
+GLOBAL_BOT: Optional[MegaTensorBot] = None
 
 @app.route("/")
 def index():
-    return "V900 Super-Signal Alert Agent Active!", 200
+    return "Mega v5.0 Custom Clean Telegram Bot Active!", 200
 
 @app.route("/health")
 def health():
     return jsonify({"status": "healthy"}), 200
 
 if __name__ == "__main__":
-    GLOBAL_BOT = V400LiveBot()
+    GLOBAL_BOT = MegaTensorBot()
     GLOBAL_BOT.start_polling_loop()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
