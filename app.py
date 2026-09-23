@@ -48,7 +48,7 @@ def get_level_bet(level: int, base_unit: int = CONFIG["base_unit"]) -> Dict[str,
 
 
 # ============================================================
-# 3. V35 SINGULARITY APEX PREDICTOR ENGINE
+# 3. V35 SINGULARITY APEX PREDICTOR ENGINE (KeyError Fixed)
 # ============================================================
 class SingularityApexEngine:
     def __init__(self, history_window: int = 80, health_window: int = 15):
@@ -56,13 +56,8 @@ class SingularityApexEngine:
         self.history_window = history_window
         self.health_window = health_window
 
-        self.pattern_health = {
-            "TREND": deque(maxlen=health_window),
-            "PINGPONG": deque(maxlen=health_window),
-            "PAIR": deque(maxlen=health_window),
-            "SANDWICH": deque(maxlen=health_window),
-            "MARKOV": deque(maxlen=health_window),
-        }
+        # 🎯 BUG FIX: KeyError မဖြစ်စေရန် defaultdict ဖြင့် အလိုအလျောက် သတ်မှတ်သည်
+        self.pattern_health = defaultdict(lambda: deque(maxlen=health_window))
         self.active_pattern = "TREND"
         self.locked_step2_pred = "BIG"
 
@@ -82,10 +77,6 @@ class SingularityApexEngine:
         return 0.85 + (win_rate * 0.30)
 
     def evaluate_market(self, level: int, step: int) -> Tuple[str, str, str]:
-        """
-        Step 1: Multi-Model Quorum Filter (Level 1: 55%, Level 2: Dual Consensus)
-        Step 2: Micro-Entropy Pulse Guard with Vector Lock
-        """
         if len(self.history) < CONFIG["warmup_target"]:
             return "SKIP", "BIG", "Warming Up Data"
 
@@ -107,7 +98,7 @@ class SingularityApexEngine:
                     streak_len += 1
                 else:
                     break
-            if self.active_pattern == "TREND" and streak_len >= 5:
+            if "TREND" in self.active_pattern and streak_len >= 5:
                 return "SKIP", "BIG", "Step 2: Trend Shock Guard (Streak >= 5)"
 
             # 2. Ping-Pong Over-Extension Hazard
@@ -117,12 +108,12 @@ class SingularityApexEngine:
                     pp_len += 1
                 else:
                     break
-            if self.active_pattern == "PINGPONG" and pp_len >= 5:
+            if "PINGPONG" in self.active_pattern and pp_len >= 5:
                 return "SKIP", "BIG", "Step 2: Ping-Pong Shock Guard (PP >= 5)"
 
             # 3. Micro-Entropy Pulse Check (Abrupt Flip Shock)
             flips = sum(1 for i in range(len(h) - 3, len(h)) if h[i] != h[i - 1])
-            if flips >= 3 and self.active_pattern == "TREND":
+            if flips >= 3 and "TREND" in self.active_pattern:
                 return "SKIP", "BIG", "Step 2: Pulse Guard (Abrupt Chaos)"
 
             return "BET", self.locked_step2_pred, "Step 2: Singularity Closer (WW Hit)"
@@ -400,7 +391,7 @@ class LiveSignalBot:
             self.engine.add(actual_outcome)
 
             # -------------------------------------------------------------
-            # ၃။ EVALUATE SIGNAL FOR NEXT PERIOD (ဥပမာ ...577 အတွက်)
+            # ၃။ EVALUATE SIGNAL FOR NEXT PERIOD
             # -------------------------------------------------------------
             action, pred, reason = self.engine.evaluate_market(
                 self.betting.level, self.betting.step
@@ -423,7 +414,6 @@ class LiveSignalBot:
                 "reason": reason,
             }
 
-            # 🎯 သင်သတ်မှတ်ပေးထားသော Format အတိုင်း တိကျစွာ ပြင်ဆင်ထားသော Message
             msg = (
                 f"💖 Period {next_period_str}\n"
                 f"🎯 SIGNAL → <b>{pred.upper()}</b> 🔥\n"
@@ -528,6 +518,5 @@ if __name__ == "__main__":
     GLOBAL_BOT = LiveSignalBot()
     GLOBAL_BOT.start_polling_loop()
     
-    # Render provides PORT environment variable
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
