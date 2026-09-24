@@ -2,6 +2,7 @@ from __future__ import annotations
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from flask import Flask, jsonify
+import math
 import os
 import random
 import requests
@@ -21,7 +22,7 @@ CONFIG = {
     "payout_rate": 0.96,               # 1:1.96 Payout
     "profit_reset_threshold": 100000,  # Target Milestone (+100,000 MMK)
     "poll_interval": 3.0,              # API Polling Interval (seconds)
-    "warmup_target": 15,               # Fast Startup Warmup
+    "warmup_target": 20,               # Warmup Chart Data (20 Candlesticks)
     "base_unit": 1000,                 # Base bet amount (1,000 MMK)
 }
 
@@ -48,188 +49,217 @@ def get_level_bet(level: int, base_unit: int = CONFIG["base_unit"]) -> Dict[str,
 
 
 # ============================================================
-# 3. V68 OMNI-SOVEREIGN PREDICTOR (Zero Exhaustion Traps)
+# 3. V72 QUANT APEX MASTER PREDICTOR ENGINE (O(1) Architecture)
 # ============================================================
-class OmniSovereignEngineV68:
-    def __init__(self, history_window: int = 80):
-        self.history: List[str] = []
-        self.history_window = history_window
+class QuantApexMasterEngineV72:
+    def __init__(self, chart_window: int = 100):
+        self.chart_window = chart_window
+        self.prices: deque[float] = deque(maxlen=chart_window)
+        self.outcomes: deque[str] = deque(maxlen=chart_window)
+        self.digits: deque[int] = deque(maxlen=chart_window)
+        self.cumulative_price: float = 1000.0
+        self.step1_trade_mode: str = "TREND"
 
-    def add(self, outcome: str):
-        self.history.append(outcome)
-        if len(self.history) > self.history_window:
-            self.history.pop(0)
+    def add_tick(self, digit: int):
+        """0-9 ဂဏန်းအား O(1) Fast Deque ထဲသို့ တိုက်ရိုက် ထည့်သွင်းခြင်း"""
+        outcome = "BIG" if digit >= 5 else "SMALL"
+        price_delta = float(digit - 4.5)
+        self.cumulative_price += price_delta
 
-    def evaluate_market(self, level: int, step: int) -> Tuple[str, str, str]:
-        if len(self.history) < CONFIG["warmup_target"]:
-            return "SKIP", "BIG", "Warming Up Data"
+        self.prices.append(self.cumulative_price)
+        self.outcomes.append(outcome)
+        self.digits.append(digit)
 
-        h = self.history
-        l1 = h[-1]
-        l2 = h[-2] if len(h) >= 2 else l1
-        l3 = h[-3] if len(h) >= 3 else l2
-        l4 = h[-4] if len(h) >= 4 else l3
-        l5 = h[-5] if len(h) >= 5 else l4
-        l6 = h[-6] if len(h) >= 6 else l5
+    # ---------------------------------------------------------
+    # TECHNICAL QUANT INDICATORS
+    # ---------------------------------------------------------
+    def _calculate_ema(self, period: int) -> float:
+        if len(self.prices) < period:
+            return self.prices[-1] if self.prices else 1000.0
+        k = 2.0 / (period + 1.0)
+        sub_series = list(self.prices)[-period:]
+        ema = sub_series[0]
+        for price in sub_series[1:]:
+            ema = (price * k) + (ema * (1.0 - k))
+        return ema
 
-        # 🎯 BALANCED ASYMMETRIC RECOVERY:
-        # Level 1: 0.45 (High Signals) | Level 2: 0.68 (Fast Recovery 1-2 Rounds) | Level 3+: 0.76
-        required_conf = 0.45 if level == 1 else (0.68 if level == 2 else 0.76)
-
-        candidate_pred = None
-        detected_conf = 0.50
-        reason = ""
-
-        # Streak အလျား တွက်ချက်ခြင်း
-        streak_len = 1
-        for i in range(len(h) - 2, -1, -1):
-            if h[i] == h[-1]:
-                streak_len += 1
+    def _calculate_rsi(self, period: int = 10) -> float:
+        if len(self.prices) < period + 1:
+            return 50.0
+        sub_series = list(self.prices)[-(period + 1) :]
+        gains, losses = 0.0, 0.0
+        for i in range(1, len(sub_series)):
+            diff = sub_series[i] - sub_series[i - 1]
+            if diff >= 0:
+                gains += diff
             else:
-                break
+                losses += abs(diff)
+        if losses == 0.0:
+            return 100.0
+        rs = (gains / period) / (losses / period)
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    def _calculate_volatility(self, period: int = 10) -> float:
+        if len(self.prices) < period:
+            return 1.0
+        sub_series = list(self.prices)[-period:]
+        mean = sum(sub_series) / period
+        variance = sum((x - mean) ** 2 for x in sub_series) / period
+        return math.sqrt(variance)
+
+    def _calculate_instant_derivative(self) -> float:
+        """3-Tick Directional Check (9-0-9 လှိုင်းမှား ဖယ်ထုတ်ခြင်း)"""
+        if len(self.prices) < 4:
+            return 0.0
+        p = list(self.prices)
+        d1 = p[-1] - p[-2]
+        d2 = p[-2] - p[-3]
+        if (d1 > 0 and d2 > 0) or (d1 < 0 and d2 < 0):
+            return p[-1] - p[-3]
+        return 0.0
+
+    # ---------------------------------------------------------
+    # QUANT MARKET EVALUATION (Signal ⟷ Level ⟷ Step)
+    # ---------------------------------------------------------
+    def evaluate_market(self, level: int, step: int) -> Tuple[str, str, str]:
+        if len(self.prices) < CONFIG["warmup_target"]:
+            return "SKIP", "BIG", "Warming Up Market Candlesticks"
+
+        ema_fast = self._calculate_ema(period=5)
+        ema_slow = self._calculate_ema(period=14)
+        rsi = self._calculate_rsi(period=10)
+        volatility = self._calculate_volatility(period=10)
+        derivative = self._calculate_instant_derivative()
+
+        trend_bias = "BIG" if ema_fast >= ema_slow else "SMALL"
+        trend_strength = abs(ema_fast - ema_slow)
 
         # -------------------------------------------------------------
-        # STEP 2 CLOSER: Live Rhythm Synchronization (WW Lock)
+        # STEP 2 CLOSER: RSI Exhaustion Priority Gate
         # -------------------------------------------------------------
         if step == 2:
-            # ၁။ Ping-Pong ဖြစ်နေပါက ပြောင်းပြန် ပိတ်မည်
-            if l1 != l2 and l2 != l3:
-                p2 = "SMALL" if l1 == "BIG" else "BIG"
-                return "BET", p2, "Step 2: Live Ping-Pong Closer (WW Lock)"
+            # Squeeze Guard
+            if volatility < 0.35 and 48.0 <= rsi <= 52.0:
+                return (
+                    "SKIP",
+                    "BIG",
+                    "Step 2: Sideways Squeeze Guard (Waiting Liquidity)",
+                )
 
-            # ၂။ 2-2 Pair အဆုံးသတ်ဖြစ်နေပါက Flip လုပ်မည်
-            elif l3 == l4 and l2 == l1 and l2 != l3:
-                p2 = "SMALL" if l1 == "BIG" else "BIG"
-                return "BET", p2, "Step 2: Live 2-2 Pair Flip Closer (WW Lock)"
+            # Priority 1: Step 1 Reversion Memory Follow-Through
+            if self.step1_trade_mode == "REVERSION_BEAR":
+                return (
+                    "BET",
+                    "SMALL",
+                    "Step 2: Bearish Reversion Follow-Through (WW Hit)",
+                )
+            elif self.step1_trade_mode == "REVERSION_BULL":
+                return (
+                    "BET",
+                    "BIG",
+                    "Step 2: Bullish Reversion Follow-Through (WW Hit)",
+                )
 
-            # ၃။ 1-3 Sandwich အဆုံးသတ်ဖြစ်နေပါက Flip လုပ်မည်
-            elif l4 == l3 and l3 == l2 and l2 != l1:
-                p2 = "SMALL" if l1 == "BIG" else "BIG"
-                return "BET", p2, "Step 2: 1-3 Sandwich Return Closer (WW Lock)"
+            # Priority 2: RSI Exhaustion Check (Overbought/Oversold Priority)
+            if rsi >= 78.0:
+                return (
+                    "BET",
+                    "SMALL",
+                    "Step 2: RSI Overbought Exhaustion Closer (WW Hit)",
+                )
+            elif rsi <= 22.0:
+                return (
+                    "BET",
+                    "BIG",
+                    "Step 2: RSI Oversold Exhaustion Closer (WW Hit)",
+                )
 
-            # ၄။ Trend သွားနေပါက တူရာ လိုက်ပိတ်မည် (Streak >= 5 Hazard Guard ပါဝင်သည်)
-            elif streak_len >= 2:
-                if streak_len >= 5:
-                    return "SKIP", "BIG", "Step 2: Trend Delay Guard (Streak >= 5)"
-                return "BET", l1, "Step 2: Live Trend Flow Closer (WW Lock)"
+            # Priority 3: Derivative Momentum Flow
+            if abs(derivative) >= 5.0:
+                shock_direction = "BIG" if derivative > 0 else "SMALL"
+                return (
+                    "BET",
+                    shock_direction,
+                    f"Step 2: Instant Velocity Alignment ({shock_direction})",
+                )
 
-            # Default Live Fallback
-            return "BET", l1, "Step 2: Live Momentum Closer (WW Lock)"
+            # Priority 4: Live Trend Continuation Closer
+            return (
+                "BET",
+                trend_bias,
+                f"Step 2: Quant {trend_bias} Flow Closer (WW Hit)",
+            )
 
         # -------------------------------------------------------------
-        # STEP 1 ENTRY: Early-Resonance Multi-Pattern Search
+        # STEP 1 ENTRY: Multi-Indicator Concurrence Matrix
         # -------------------------------------------------------------
+        signal = None
+        confidence = 0.50
+        reason = ""
+        trade_mode = "TREND"
 
-        # Pattern 1: Exact 2-2 Double Pair (AA-BB -> Flip to A)
-        if l3 == l4 and l2 != l3 and l1 == l2:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.88
-            reason = "Tier-1: Exact 2-2 Double Pair"
+        # Strategy 1: RSI Extreme Mean-Reversion Snap
+        if rsi >= 75.0:
+            signal = "SMALL"
+            confidence = 0.90
+            trade_mode = "REVERSION_BEAR"
+            reason = f"Quant: RSI Overbought Snap (RSI: {rsi:.1f})"
+        elif rsi <= 25.0:
+            signal = "BIG"
+            confidence = 0.90
+            trade_mode = "REVERSION_BULL"
+            reason = f"Quant: RSI Oversold Snap (RSI: {rsi:.1f})"
 
-        # Pattern 2: Pure 4-Step Ping-Pong (A-B-A-B -> Flip)
-        elif l1 != l2 and l2 != l3 and l3 != l4:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.90
-            reason = "Tier-1: Pure 4-Step Ping-Pong"
+        # Strategy 2: Filtered Derivative Surge
+        elif abs(derivative) >= 6.0:
+            signal = "BIG" if derivative > 0 else "SMALL"
+            confidence = 0.88
+            trade_mode = "TREND"
+            reason = f"Quant: Verified Derivative Surge ({signal})"
 
-        # Pattern 3: Dragon Streak Early Flow (Streak 3~4 - အရှိန်ကောင်းချိန် ဝင်သည်)
-        elif streak_len in [3, 4]:
-            candidate_pred = l1
-            detected_conf = 0.85
-            reason = f"Tier-1: Early Dragon Streak Flow (Len: {streak_len})"
+        # Strategy 3: Strong Trend Breakout
+        elif trend_strength >= 1.5 and (
+            (trend_bias == "BIG" and rsi >= 55.0)
+            or (trend_bias == "SMALL" and rsi <= 45.0)
+        ):
+            signal = trend_bias
+            confidence = 0.86
+            trade_mode = "TREND"
+            reason = f"Quant: Strong EMA Breakout ({trend_bias})"
 
-        # Pattern 4: 1-3 Stick-Sandwich (A-BBB-A -> A)
-        elif l5 != l4 and l4 == l3 and l3 == l2 and l2 != l1:
-            candidate_pred = l1
-            detected_conf = 0.86
-            reason = "Tier-1: 1-3 Stick-Sandwich"
+        # Strategy 4: Standard Trend Wave Following
+        elif trend_strength >= 0.4:
+            signal = trend_bias
+            confidence = 0.76
+            trade_mode = "TREND"
+            reason = f"Quant: {trend_bias} Wave Flow"
 
-        # Pattern 5: 2-1-2 Symmetrical Sandwich (AA-B-AA -> B)
-        elif l5 == l4 and l4 != l3 and l3 != l2 and l2 == l1:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.86
-            reason = "Tier-1: 2-1-2 Symmetrical Sandwich"
-
-        # Pattern 6: 3-1 Snapback Rebound (AAA-B -> A)
-        elif l4 == l3 and l3 == l2 and l2 != l1:
-            candidate_pred = l2
-            detected_conf = 0.85
-            reason = "Tier-1: 3-1 Snapback Rebound"
-
-        # Pattern 7: 1-2-1 Butterfly Sandwich (A-BB-A -> B)
-        elif l4 != l3 and l3 == l2 and l2 != l1:
-            candidate_pred = l1
-            detected_conf = 0.80
-            reason = "1-2-1 Butterfly Sandwich Flow"
-
-        # Pattern 8: 2-1-2-1 Syncopated Wave
-        elif l6 == l5 and l5 != l4 and l4 == l3 and l3 == l2 and l2 != l1:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.82
-            reason = "2-1-2-1 Syncopated Wave"
-
-        # Pattern 9: 1-1-2 Rhythm Transition (A-B-A-A -> B)
-        elif l4 != l3 and l3 != l2 and l2 == l1:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.78
-            reason = "1-1-2 Rhythm Transition"
-
-        # Pattern 10: Ping-Pong 3-Step (A-B-A -> Flip)
-        elif l1 != l2 and l2 != l3:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.76
-            reason = "Ping-Pong 3-Step Momentum"
-
-        # Pattern 11: Early 2-Streak Momentum (AA -> A)
-        elif l1 == l2 and l3 == l4 and l2 != l3:
-            candidate_pred = l1
-            detected_conf = 0.74
-            reason = "Early 2-Streak Momentum"
-
-        # Pattern 12: 2-1 Breakout Symmetry (AA-B -> A)
-        elif l4 != l3 and l3 == l2 and l2 != l1:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.72
-            reason = "2-1 Breakout Symmetry"
-
-        # Pattern 13: Micro-Chop Vector (A-B -> A)
-        elif l1 != l2 and l3 == l2:
-            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.70
-            reason = "Micro-Chop Momentum"
-
-        # Fallback: Dual-Horizon Markov Engine
+        # Strategy 5: Micro-Price Impulse Flow
         else:
-            target = tuple(h[-2:])
-            pair_counts = defaultdict(int)
-            search_h = h[:-2]
-            for i in range(len(search_h) - 2):
-                if tuple(search_h[i : i + 2]) == target:
-                    pair_counts[search_h[i + 2]] += 1
-            if pair_counts:
-                best = max(pair_counts, key=pair_counts.get)
-                total = sum(pair_counts.values())
-                if total >= 3:
-                    conf = pair_counts[best] / total
-                    if conf >= 0.56:
-                        candidate_pred = best
-                        detected_conf = conf
-                        reason = f"Fast Markov Trend ({conf*100:.0f}%, N={total})"
+            p_list = list(self.prices)
+            recent_delta = p_list[-1] - p_list[-4]
+            if abs(recent_delta) >= 2.0:
+                signal = "BIG" if recent_delta > 0 else "SMALL"
+                confidence = 0.65
+                trade_mode = "TREND"
+                reason = f"Quant: Micro-Price Impulse ({signal})"
 
-        # LEVEL 2 STABILITY SHIELD
-        if level >= 2:
-            recent_flips = sum(1 for i in range(len(h) - 4, len(h)) if h[i] != h[i - 1])
-            if recent_flips >= 4:
-                return "SKIP", "BIG", "Level 2: Chaos Shield Active"
+        # 🎯 ASYMMETRIC TIERED SHIELD: Level 1: 0.48 (90% Signals) | Level 2+: 0.80 Fortress
+        required_conf = 0.48 if level == 1 else (0.80 if level == 2 else 0.88)
 
-        if candidate_pred and detected_conf >= required_conf:
-            return "BET", candidate_pred, f"Step {step}: {reason}"
+        if signal and confidence >= required_conf:
+            self.step1_trade_mode = trade_mode
+            return "BET", signal, reason
 
-        return "SKIP", "BIG", f"Market Noise (Conf < {required_conf*100:.0f}%)"
+        return (
+            "SKIP",
+            "BIG",
+            f"Market Squeeze Filter (Conf: {confidence*100:.0f}%)",
+        )
 
 
 # ============================================================
-# 4. EXACT UNBOUNDED FIBONACCI STATE MANAGER (Bot Step Fixed)
+# 4. EXACT UNBOUNDED FIBONACCI STATE MANAGER
 # ============================================================
 class BettingStateManager:
     def __init__(self):
@@ -322,7 +352,7 @@ class BettingStateManager:
 class LiveSignalBot:
     def __init__(self):
         self.lock = threading.Lock()
-        self.engine = OmniSovereignEngineV68()
+        self.engine = QuantApexMasterEngineV72()
         self.betting = BettingStateManager()
         self.last_signal_info: Optional[Dict[str, any]] = None
         self.last_processed_period: Optional[str] = None
@@ -356,9 +386,9 @@ class LiveSignalBot:
             # -------------------------------------------------------------
             # ၁။ WARMUP PHASE
             # -------------------------------------------------------------
-            if len(self.engine.history) < CONFIG["warmup_target"]:
-                self.engine.add(actual_outcome)
-                current_count = len(self.engine.history)
+            if len(self.engine.prices) < CONFIG["warmup_target"]:
+                self.engine.add_tick(digit)
+                current_count = len(self.engine.prices)
                 self.send_telegram(
                     f"📊 <b>Data Warming up... [ {current_count} / {CONFIG['warmup_target']} ]</b>\n"
                     f"Period {current_period_str} → {actual_outcome} ({digit})"
@@ -399,8 +429,8 @@ class LiveSignalBot:
                         self.send_telegram(milestone_msg)
                         self.betting.reset_milestone()
 
-            # Update Engine with the newly finished round result
-            self.engine.add(actual_outcome)
+            # Update Engine with the newly finished round tick
+            self.engine.add_tick(digit)
 
             # -------------------------------------------------------------
             # ၃။ EVALUATE SIGNAL FOR NEXT PERIOD (ဥပမာ ...577 အတွက်)
@@ -447,7 +477,7 @@ class LiveSignalBot:
     # -------------------------------------------------------------
     def start_polling_loop(self):
         def worker():
-            print("[LiveSignalBot V68] Starting 6lottery API Poller...", flush=True)
+            print("[LiveSignalBot V72] Starting 6lottery API Poller...", flush=True)
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": (
@@ -504,6 +534,7 @@ class LiveSignalBot:
 # ============================================================
 app = Flask(__name__)
 
+# 🎯 FAST-BOOT: Gunicorn နှင့် Render အတွက် Module Level တွင် တိုက်ရိုက် စတင်သည်
 GLOBAL_BOT = LiveSignalBot()
 GLOBAL_BOT.start_polling_loop()
 
@@ -511,7 +542,7 @@ GLOBAL_BOT.start_polling_loop()
 def index():
     return jsonify({
         "status": "online",
-        "engine": "V68 Omni-Sovereign Balanced Active Flow",
+        "engine": "V72 Quant Apex Master 90% Active Flow",
         "current_level": GLOBAL_BOT.betting.level,
         "max_level_reached": GLOBAL_BOT.betting.max_level_reached,
         "total_profit": GLOBAL_BOT.betting.total_profit,
