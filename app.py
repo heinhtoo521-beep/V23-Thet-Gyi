@@ -48,14 +48,12 @@ def get_level_bet(level: int, base_unit: int = CONFIG["base_unit"]) -> Dict[str,
 
 
 # ============================================================
-# 3. V67 SOVEREIGN BYPASS PREDICTOR ENGINE (Bug Fixed)
+# 3. V68 OMNI-SOVEREIGN PREDICTOR (Zero Exhaustion Traps)
 # ============================================================
-class SovereignBypassEngineV67:
+class OmniSovereignEngineV68:
     def __init__(self, history_window: int = 80):
         self.history: List[str] = []
         self.history_window = history_window
-        self.locked_step2_pred = "BIG"
-        self.step2_reason = ""
 
     def add(self, outcome: str):
         self.history.append(outcome)
@@ -74,13 +72,13 @@ class SovereignBypassEngineV67:
         l5 = h[-5] if len(h) >= 5 else l4
         l6 = h[-6] if len(h) >= 6 else l5
 
-        # 🎯 ASYMMETRIC TIERED SHIELD: Level 1: 0.44 (90% Signals) | Level 2+: 0.84 Fortress | Level 3+: 0.90
-        required_conf = 0.44 if level == 1 else (0.84 if level == 2 else 0.90)
+        # 🎯 BALANCED ASYMMETRIC RECOVERY:
+        # Level 1: 0.45 (High Signals) | Level 2: 0.68 (Fast Recovery 1-2 Rounds) | Level 3+: 0.76
+        required_conf = 0.45 if level == 1 else (0.68 if level == 2 else 0.76)
 
-        # 🎯 BUG FIX: candidate_p1 Variable ကို အစောဆုံး ကြိုတင်သတ်မှတ်ထားသည်
-        candidate_p1: Optional[str] = None
-        detected_conf: float = 0.50
-        reason: str = ""
+        candidate_pred = None
+        detected_conf = 0.50
+        reason = ""
 
         # Streak အလျား တွက်ချက်ခြင်း
         streak_len = 1
@@ -91,126 +89,116 @@ class SovereignBypassEngineV67:
                 break
 
         # -------------------------------------------------------------
-        # STEP 2 CLOSER: Bypass Precedence Order (Zero Collision)
+        # STEP 2 CLOSER: Live Rhythm Synchronization (WW Lock)
         # -------------------------------------------------------------
         if step == 2:
-            # ၁။ 2-2 Pair အဆုံးသတ်ဖြစ်နေပါက Flip လုပ်မည် (ဦးစားပေး ၁)
-            if l3 == l4 and l2 == l1 and l2 != l3:
+            # ၁။ Ping-Pong ဖြစ်နေပါက ပြောင်းပြန် ပိတ်မည်
+            if l1 != l2 and l2 != l3:
+                p2 = "SMALL" if l1 == "BIG" else "BIG"
+                return "BET", p2, "Step 2: Live Ping-Pong Closer (WW Lock)"
+
+            # ၂။ 2-2 Pair အဆုံးသတ်ဖြစ်နေပါက Flip လုပ်မည်
+            elif l3 == l4 and l2 == l1 and l2 != l3:
                 p2 = "SMALL" if l1 == "BIG" else "BIG"
                 return "BET", p2, "Step 2: Live 2-2 Pair Flip Closer (WW Lock)"
 
-            # ၂။ 1-3 Stick-Sandwich အဆုံးသတ်ဖြစ်နေပါက Flip လုပ်မည် (ဦးစားပေး ၂)
+            # ၃။ 1-3 Sandwich အဆုံးသတ်ဖြစ်နေပါက Flip လုပ်မည်
             elif l4 == l3 and l3 == l2 and l2 != l1:
                 p2 = "SMALL" if l1 == "BIG" else "BIG"
                 return "BET", p2, "Step 2: 1-3 Sandwich Return Closer (WW Lock)"
 
-            # ၃။ 1-2 Stick-Pair ဖြစ်နေပါက အတွဲစုံအောင် Same ထိုးမည် (ဦးစားပေး ၃)
-            elif l3 != l2 and l2 == l1:
-                p2 = l1
-                return "BET", p2, "Step 2: 1-2 Stick-Pair Completion Closer (WW Lock)"
-
-            # ၄။ စစ်မှန်သော Ping-Pong ဖြစ်နေပါက ပြောင်းပြန် ပိတ်မည် (ဦးစားပေး ၄)
-            elif l1 != l2 and l2 != l3:
-                p2 = "SMALL" if l1 == "BIG" else "BIG"
-                return "BET", p2, "Step 2: Live Ping-Pong Closer (WW Lock)"
-
-            # ၅။ Trend သွားနေပါက တူရာ လိုက်ပိတ်မည်
+            # ၄။ Trend သွားနေပါက တူရာ လိုက်ပိတ်မည် (Streak >= 5 Hazard Guard ပါဝင်သည်)
             elif streak_len >= 2:
                 if streak_len >= 5:
                     return "SKIP", "BIG", "Step 2: Trend Delay Guard (Streak >= 5)"
                 return "BET", l1, "Step 2: Live Trend Flow Closer (WW Lock)"
 
+            # Default Live Fallback
             return "BET", l1, "Step 2: Live Momentum Closer (WW Lock)"
 
         # -------------------------------------------------------------
-        # STEP 1 ENTRY: 14 High-Density Balanced Patterns
+        # STEP 1 ENTRY: Early-Resonance Multi-Pattern Search
         # -------------------------------------------------------------
 
-        # Tier-1 Pattern 1: Pure 4-Step Ping-Pong (A-B-A-B -> Flip)
-        if l1 != l2 and l2 != l3 and l3 != l4:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.90
-            reason = "Tier-1: Pure 4-Step Ping-Pong"
-
-        # Tier-1 Pattern 2: Exact 2-2 Double Pair (AA-BB -> Flip to A)
-        elif l3 == l4 and l2 != l3 and l1 == l2:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+        # Pattern 1: Exact 2-2 Double Pair (AA-BB -> Flip to A)
+        if l3 == l4 and l2 != l3 and l1 == l2:
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
             detected_conf = 0.88
             reason = "Tier-1: Exact 2-2 Double Pair"
 
-        # Tier-1 Pattern 3: Dragon Streak Flow (Streak 4+)
-        elif streak_len >= 4:
-            candidate_p1 = l1
-            detected_conf = min(0.95, 0.84 + (streak_len * 0.03))
-            reason = f"Tier-1: Dragon Streak Flow (Len: {streak_len})"
+        # Pattern 2: Pure 4-Step Ping-Pong (A-B-A-B -> Flip)
+        elif l1 != l2 and l2 != l3 and l3 != l4:
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
+            detected_conf = 0.90
+            reason = "Tier-1: Pure 4-Step Ping-Pong"
 
-        # Tier-1 Pattern 4: 1-3 Stick-Sandwich (A-BBB-A -> A)
+        # Pattern 3: Dragon Streak Early Flow (Streak 3~4 - အရှိန်ကောင်းချိန် ဝင်သည်)
+        elif streak_len in [3, 4]:
+            candidate_pred = l1
+            detected_conf = 0.85
+            reason = f"Tier-1: Early Dragon Streak Flow (Len: {streak_len})"
+
+        # Pattern 4: 1-3 Stick-Sandwich (A-BBB-A -> A)
         elif l5 != l4 and l4 == l3 and l3 == l2 and l2 != l1:
-            candidate_p1 = l1
+            candidate_pred = l1
             detected_conf = 0.86
             reason = "Tier-1: 1-3 Stick-Sandwich"
 
-        # Tier-1 Pattern 5: 2-1-2 Symmetrical Sandwich (AA-B-AA -> B)
+        # Pattern 5: 2-1-2 Symmetrical Sandwich (AA-B-AA -> B)
         elif l5 == l4 and l4 != l3 and l3 != l2 and l2 == l1:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
             detected_conf = 0.86
             reason = "Tier-1: 2-1-2 Symmetrical Sandwich"
 
-        # Tier-1 Pattern 6: 3-1 Snapback Rebound (AAA-B -> A)
+        # Pattern 6: 3-1 Snapback Rebound (AAA-B -> A)
         elif l4 == l3 and l3 == l2 and l2 != l1:
-            candidate_p1 = l2
+            candidate_pred = l2
             detected_conf = 0.85
             reason = "Tier-1: 3-1 Snapback Rebound"
 
-        # Level-1 Only Pattern 7: 1-2-1 Butterfly Sandwich (A-BB-A -> B)
+        # Pattern 7: 1-2-1 Butterfly Sandwich (A-BB-A -> B)
         elif l4 != l3 and l3 == l2 and l2 != l1:
-            candidate_p1 = l1
+            candidate_pred = l1
             detected_conf = 0.80
-            reason = "Level-1: Butterfly Sandwich Flow"
+            reason = "1-2-1 Butterfly Sandwich Flow"
 
-        # Level-1 Only Pattern 8: 2-1-2-1 Syncopated Wave
+        # Pattern 8: 2-1-2-1 Syncopated Wave
         elif l6 == l5 and l5 != l4 and l4 == l3 and l3 == l2 and l2 != l1:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
             detected_conf = 0.82
-            reason = "Level-1: 2-1-2-1 Syncopated Wave"
+            reason = "2-1-2-1 Syncopated Wave"
 
-        # Level-1 Only Pattern 9: 1-1-2 Rhythm Transition (A-B-A-A -> B)
+        # Pattern 9: 1-1-2 Rhythm Transition (A-B-A-A -> B)
         elif l4 != l3 and l3 != l2 and l2 == l1:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
             detected_conf = 0.78
-            reason = "Level-1: 1-1-2 Rhythm Transition"
+            reason = "1-1-2 Rhythm Transition"
 
-        # Level-1 Only Pattern 10: Dragon 3-Streak
-        elif streak_len == 3:
-            candidate_p1 = l1
-            detected_conf = 0.76
-            reason = "Level-1: Dragon 3-Streak Momentum"
-
-        # Level-1 Only Pattern 11: Ping-Pong 3-Step (A-B-A -> Flip)
+        # Pattern 10: Ping-Pong 3-Step (A-B-A -> Flip)
         elif l1 != l2 and l2 != l3:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
-            detected_conf = 0.75
-            reason = "Level-1: Ping-Pong 3-Step"
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
+            detected_conf = 0.76
+            reason = "Ping-Pong 3-Step Momentum"
 
-        # Level-1 Only Pattern 12: Early 2-Streak Momentum (AA -> A)
+        # Pattern 11: Early 2-Streak Momentum (AA -> A)
         elif l1 == l2 and l3 == l4 and l2 != l3:
-            candidate_p1 = l1
+            candidate_pred = l1
             detected_conf = 0.74
-            reason = "Level-1: Early 2-Streak Momentum"
+            reason = "Early 2-Streak Momentum"
 
-        # Level-1 Only Pattern 13: 2-1 Breakout Symmetry (AA-B -> A)
+        # Pattern 12: 2-1 Breakout Symmetry (AA-B -> A)
         elif l4 != l3 and l3 == l2 and l2 != l1:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
             detected_conf = 0.72
-            reason = "Level-1: 2-1 Breakout Symmetry"
+            reason = "2-1 Breakout Symmetry"
 
-        # Level-1 Only Pattern 14: Micro-Chop Vector (A-B -> A)
+        # Pattern 13: Micro-Chop Vector (A-B -> A)
         elif l1 != l2 and l3 == l2:
-            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_pred = "SMALL" if l1 == "BIG" else "BIG"
             detected_conf = 0.70
-            reason = "Level-1: Micro-Chop Momentum"
+            reason = "Micro-Chop Momentum"
 
-        # Fallback: Bayesian Laplace-Smoothed Markov Engine
+        # Fallback: Dual-Horizon Markov Engine
         else:
             target = tuple(h[-2:])
             pair_counts = defaultdict(int)
@@ -222,22 +210,20 @@ class SovereignBypassEngineV67:
                 best = max(pair_counts, key=pair_counts.get)
                 total = sum(pair_counts.values())
                 if total >= 3:
-                    conf = (pair_counts[best] + 1) / (total + 2)
-                    if conf >= 0.58:
-                        candidate_p1 = best
+                    conf = pair_counts[best] / total
+                    if conf >= 0.56:
+                        candidate_pred = best
                         detected_conf = conf
-                        reason = f"Bayesian Markov Trend ({conf*100:.0f}%, N={total})"
+                        reason = f"Fast Markov Trend ({conf*100:.0f}%, N={total})"
 
-        # LEVEL 2 INTELLIGENT SHIELD BYPASS
+        # LEVEL 2 STABILITY SHIELD
         if level >= 2:
-            is_pure_pingpong = (l1 != l2 and l2 != l3 and l3 != l4)
-            if not is_pure_pingpong:
-                recent_flips = sum(1 for i in range(len(h) - 4, len(h)) if h[i] != h[i - 1])
-                if recent_flips >= 4:
-                    return "SKIP", "BIG", "Level 2: Chaos Shield Active"
+            recent_flips = sum(1 for i in range(len(h) - 4, len(h)) if h[i] != h[i - 1])
+            if recent_flips >= 4:
+                return "SKIP", "BIG", "Level 2: Chaos Shield Active"
 
-        if candidate_p1 and detected_conf >= required_conf:
-            return "BET", candidate_p1, f"Step {step}: {reason}"
+        if candidate_pred and detected_conf >= required_conf:
+            return "BET", candidate_pred, f"Step {step}: {reason}"
 
         return "SKIP", "BIG", f"Market Noise (Conf < {required_conf*100:.0f}%)"
 
@@ -336,7 +322,7 @@ class BettingStateManager:
 class LiveSignalBot:
     def __init__(self):
         self.lock = threading.Lock()
-        self.engine = SovereignBypassEngineV67()
+        self.engine = OmniSovereignEngineV68()
         self.betting = BettingStateManager()
         self.last_signal_info: Optional[Dict[str, any]] = None
         self.last_processed_period: Optional[str] = None
@@ -461,7 +447,7 @@ class LiveSignalBot:
     # -------------------------------------------------------------
     def start_polling_loop(self):
         def worker():
-            print("[LiveSignalBot V67] Starting 6lottery API Poller...", flush=True)
+            print("[LiveSignalBot V68] Starting 6lottery API Poller...", flush=True)
             headers = {
                 "accept": "application/json, text/plain, */*",
                 "authorization": (
@@ -525,7 +511,7 @@ GLOBAL_BOT.start_polling_loop()
 def index():
     return jsonify({
         "status": "online",
-        "engine": "V67 Sovereign Bypass 90% Active Flow",
+        "engine": "V68 Omni-Sovereign Balanced Active Flow",
         "current_level": GLOBAL_BOT.betting.level,
         "max_level_reached": GLOBAL_BOT.betting.max_level_reached,
         "total_profit": GLOBAL_BOT.betting.total_profit,
