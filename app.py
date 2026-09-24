@@ -40,7 +40,7 @@ def fib(n: int) -> int:
 
 
 def get_level_bet(level: int, base_unit: int = CONFIG["base_unit"]) -> Dict[str, int]:
-    """1:2 Win-Win Ratio Fibonacci Table"""
+    """သင်၏ မူလ 1:2 Win-Win Ratio Fibonacci Table"""
     f = fib(max(1, level))
     bet1 = base_unit * f
     bet2 = bet1 * 2
@@ -122,7 +122,6 @@ class SupremeApexPredictorEngine:
                 elif "PINGPONG" in self.active_pattern:
                     self.locked_step2_pred = "SMALL" if l1 == "BIG" else "BIG"
                 elif "PAIR" in self.active_pattern:
-                    # 2-2 Pair: ၂ လုံးပြည့်ပါက ပြောင်းပြန်လှန်ပြီး၊ ၁ လုံးတည်းဖြစ်ပါက တူရာလိုက်သည်
                     if l1 == l2:
                         self.locked_step2_pred = "SMALL" if l1 == "BIG" else "BIG"
                     else:
@@ -536,15 +535,16 @@ class LiveSignalBot:
 
 
 # ============================================================
-# 6. FLASK WEB SERVER FOR RENDER DEPLOYMENT
+# 6. FLASK WEB SERVER & GLOBAL INSTANCE INITIALIZATION
 # ============================================================
 app = Flask(__name__)
-GLOBAL_BOT: Optional[LiveSignalBot] = None
+
+# 🎯 FAST-BOOT FIX: Gunicorn နှင့် Render အတွက် Global Scope တွင် ချက်ချင်းစတင်လည်ပတ်စေသည်
+GLOBAL_BOT = LiveSignalBot()
+GLOBAL_BOT.start_polling_loop()
 
 @app.route("/")
 def index():
-    if not GLOBAL_BOT:
-        return "Bot is initializing...", 200
     return jsonify({
         "status": "online",
         "engine": "Supreme Apex 75% Active Signal",
@@ -564,8 +564,5 @@ def health():
 # 7. MAIN ENTRY POINT
 # ============================================================
 if __name__ == "__main__":
-    GLOBAL_BOT = LiveSignalBot()
-    GLOBAL_BOT.start_polling_loop()
-    
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
