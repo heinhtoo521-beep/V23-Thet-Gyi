@@ -21,16 +21,16 @@ CONFIG = {
     "payout_rate": 0.96,               # 1:1.96 Payout
     "profit_reset_threshold": 100000,  # Target Milestone (+100,000 MMK)
     "poll_interval": 3.0,              # API Polling Interval (seconds)
-    "warmup_target": 25,               # Minimum data rounds before signal
+    "warmup_target": 15,               # Fast Startup Warmup
     "base_unit": 1000,                 # Base bet amount (1,000 MMK)
 }
 
 
 # ============================================================
-# 2. DYNAMIC FIBONACCI BET SIZING
+# 2. EXACT UNBOUNDED FIBONACCI BET SIZING
 # ============================================================
 def fib(n: int) -> int:
-    """1-based Fibonacci calculation: 1, 1, 2, 3, 5, 8, 13, 21..."""
+    """1-based Fibonacci calculation: 1, 1, 2, 3, 5, 8, 13, 21, 34..."""
     if n <= 2:
         return 1
     a, b = 1, 1
@@ -48,33 +48,21 @@ def get_level_bet(level: int, base_unit: int = CONFIG["base_unit"]) -> Dict[str,
 
 
 # ============================================================
-# 3. V35 SINGULARITY APEX PREDICTOR ENGINE (KeyError Fixed)
+# 3. HIGH-DENSITY APEX PREDICTOR ENGINE (75% Active Signal)
 # ============================================================
-class SingularityApexEngine:
-    def __init__(self, history_window: int = 80, health_window: int = 15):
+class SupremeApexPredictorEngine:
+    def __init__(self, history_window: int = 80):
         self.history: List[str] = []
         self.history_window = history_window
-        self.health_window = health_window
-
-        # 🎯 BUG FIX: KeyError မဖြစ်စေရန် defaultdict ဖြင့် အလိုအလျောက် သတ်မှတ်သည်
-        self.pattern_health = defaultdict(lambda: deque(maxlen=health_window))
         self.active_pattern = "TREND"
         self.locked_step2_pred = "BIG"
+        self.step2_reason = ""
+        self.step2_delayed = False
 
     def add(self, outcome: str):
         self.history.append(outcome)
         if len(self.history) > self.history_window:
             self.history.pop(0)
-
-    def update_pattern_health(self, is_win: bool):
-        self.pattern_health[self.active_pattern].append(1 if is_win else 0)
-
-    def _get_health_multiplier(self, pattern_name: str) -> float:
-        hist = self.pattern_health[pattern_name]
-        if len(hist) == 0:
-            return 1.0
-        win_rate = sum(hist) / len(hist)
-        return 0.85 + (win_rate * 0.30)
 
     def evaluate_market(self, level: int, step: int) -> Tuple[str, str, str]:
         if len(self.history) < CONFIG["warmup_target"]:
@@ -86,137 +74,199 @@ class SingularityApexEngine:
         l3 = h[-3] if len(h) >= 3 else l2
         l4 = h[-4] if len(h) >= 4 else l3
         l5 = h[-5] if len(h) >= 5 else l4
+        l6 = h[-6] if len(h) >= 6 else l5
+
+        # 🎯 ASYMMETRIC TIERED SHIELD:
+        # Level 1: 0.50 (75% Signals) | Level 2: 0.85 (Fortress) | Level 3+: 0.90 (Shield)
+        required_conf = 0.50 if level == 1 else (0.85 if level == 2 else 0.90)
 
         # -------------------------------------------------------------
-        # STEP 2 CLOSER: Micro-Entropy Pulse Guard
+        # STEP 2 CLOSER: Universal Hazard Guard & Explicit Re-Sync
         # -------------------------------------------------------------
         if step == 2:
-            # 1. Trend Streak Over-Extension Hazard
+            # 1. Trend Over-Extension Guard (Streak >= 5)
             streak_len = 1
             for i in range(len(h) - 2, -1, -1):
                 if h[i] == h[-1]:
                     streak_len += 1
                 else:
                     break
-            if "TREND" in self.active_pattern and streak_len >= 5:
-                return "SKIP", "BIG", "Step 2: Trend Shock Guard (Streak >= 5)"
 
-            # 2. Ping-Pong Over-Extension Hazard
+            if "TREND" in self.active_pattern and streak_len >= 5:
+                self.step2_delayed = True
+                return "SKIP", "BIG", "Step 2: Trend Delay Guard (Streak >= 5)"
+
+            # 2. Ping-Pong Over-Extension Guard (PP >= 5)
             pp_len = 1
             for i in range(len(h) - 1, 0, -1):
                 if h[i] != h[i - 1]:
                     pp_len += 1
                 else:
                     break
+
             if "PINGPONG" in self.active_pattern and pp_len >= 5:
-                return "SKIP", "BIG", "Step 2: Ping-Pong Shock Guard (PP >= 5)"
+                self.step2_delayed = True
+                return "SKIP", "BIG", "Step 2: Ping-Pong Delay Guard (PP >= 5)"
 
-            # 3. Micro-Entropy Pulse Check (Abrupt Flip Shock)
+            # 3. Universal Chaos Shock Guard
             flips = sum(1 for i in range(len(h) - 3, len(h)) if h[i] != h[i - 1])
-            if flips >= 3 and "TREND" in self.active_pattern:
-                return "SKIP", "BIG", "Step 2: Pulse Guard (Abrupt Chaos)"
+            if flips >= 3:
+                self.step2_delayed = True
+                return "SKIP", "BIG", "Step 2: Universal Chaos Guard"
 
-            return "BET", self.locked_step2_pred, "Step 2: Singularity Closer (WW Hit)"
+            # 🎯 DYNAMIC EXPLICIT RE-ALIGNMENT
+            if self.step2_delayed:
+                self.step2_delayed = False
+                if "TREND" in self.active_pattern:
+                    self.locked_step2_pred = l1
+                elif "PINGPONG" in self.active_pattern:
+                    self.locked_step2_pred = "SMALL" if l1 == "BIG" else "BIG"
+                elif "PAIR" in self.active_pattern:
+                    # 2-2 Pair: ၂ လုံးပြည့်ပါက ပြောင်းပြန်လှန်ပြီး၊ ၁ လုံးတည်းဖြစ်ပါက တူရာလိုက်သည်
+                    if l1 == l2:
+                        self.locked_step2_pred = "SMALL" if l1 == "BIG" else "BIG"
+                    else:
+                        self.locked_step2_pred = l1
+                elif "SANDWICH" in self.active_pattern:
+                    self.locked_step2_pred = "SMALL" if l1 == "BIG" else "BIG"
+
+            return "BET", self.locked_step2_pred, self.step2_reason
 
         # -------------------------------------------------------------
-        # STEP 1 ENTRY: Multi-Model Quorum Recognition
+        # STEP 1 ENTRY: 10-Pattern Omni-Radar (+20% Active Boost)
         # -------------------------------------------------------------
-        agent_votes = {}
+        candidate_p1 = None
+        candidate_p2 = None
+        detected_conf = 0.50
+        pattern_name = "TREND"
+        reason = ""
 
-        # Agent 1: 2-2 Double Pair (AA-BB -> Flip to A)
+        # Tier-1 Pattern (A): Exact 2-2 Double Pair (AA-BB -> Flip to A, then A)
         if l3 == l4 and l2 != l3 and l1 == l2:
-            p1 = "SMALL" if l1 == "BIG" else "BIG"
-            agent_votes["PAIR"] = (p1, 0.88 * self._get_health_multiplier("PAIR"))
+            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_p2 = candidate_p1
+            detected_conf = 0.88
+            pattern_name = "PAIR"
+            reason = "Tier-1: Exact 2-2 Double Pair"
 
-        # Agent 2: Pure 4-Step Ping-Pong (A-B-A-B -> Flip)
-        if l1 != l2 and l2 != l3 and l3 != l4:
-            p1 = "SMALL" if l1 == "BIG" else "BIG"
-            agent_votes["PINGPONG"] = (p1, 0.90 * self._get_health_multiplier("PINGPONG"))
+        # Tier-1 Pattern (B): Pure 4-Step Ping-Pong (A-B-A-B -> Flip, then Flip)
+        elif l1 != l2 and l2 != l3 and l3 != l4:
+            candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+            candidate_p2 = l1
+            detected_conf = 0.90
+            pattern_name = "PINGPONG"
+            reason = "Tier-1: Pure 4-Step Ping-Pong"
 
-        # Agent 3: Dragon Trend Flow (Streak 3+)
-        streak_len = 1
-        for i in range(len(h) - 2, -1, -1):
-            if h[i] == h[-1]:
-                streak_len += 1
-            else:
-                break
-        if streak_len >= 3:
-            agent_votes["TREND"] = (
-                l1,
-                min(0.94, 0.76 + (streak_len * 0.04)) * self._get_health_multiplier("TREND"),
-            )
-
-        # Agent 4: 1-3 Stick-Sandwich (A-BBB-A -> A)
-        if l5 != l4 and l4 == l3 and l3 == l2 and l2 != l1:
-            agent_votes["SANDWICH"] = (l1, 0.82 * self._get_health_multiplier("SANDWICH"))
-
-        # Agent 5: Dual-Horizon Markov Memory
-        target = tuple(h[-2:])
-        pair_counts = defaultdict(int)
-        search_h = h[:-2]
-        for i in range(len(search_h) - 2):
-            if tuple(search_h[i : i + 2]) == target:
-                pair_counts[search_h[i + 2]] += 1
-        if pair_counts:
-            best = max(pair_counts, key=pair_counts.get)
-            total = sum(pair_counts.values())
-            if total >= 3:
-                conf = (pair_counts[best] / total) * self._get_health_multiplier("MARKOV")
-                if conf >= 0.68:
-                    agent_votes["MARKOV"] = (best, conf)
-
-        # Level 1 Micro-Transitions
-        if level == 1:
-            if l1 != l2 and l2 != l3 and "PINGPONG" not in agent_votes:
-                agent_votes["PINGPONG_3"] = ("SMALL" if l1 == "BIG" else "BIG", 0.74)
-            if l1 == l2 and l3 == l4 and l2 != l3 and "TREND" not in agent_votes:
-                agent_votes["EARLY_2"] = (l1, 0.70)
-
-        if not agent_votes:
-            return "SKIP", "BIG", "Market Noise (No Concurrence)"
-
-        # Vote Consensus Aggregation
-        score_big = sum(conf for p, conf in agent_votes.values() if p == "BIG")
-        score_small = sum(conf for p, conf in agent_votes.values() if p == "SMALL")
-        best_pred = "BIG" if score_big >= score_small else "SMALL"
-
-        agreeing_agents = [agent for agent, (p, conf) in agent_votes.items() if p == best_pred]
-        max_conf = max(conf for p, conf in agent_votes.values() if p == best_pred)
-
-        # LEVEL 1: High Volume Entry (Threshold >= 0.55)
-        if level == 1:
-            if max_conf >= 0.55:
-                self.active_pattern = agreeing_agents[0]
-                self.locked_step2_pred = (
-                    best_pred
-                    if ("TREND" in self.active_pattern or "SANDWICH" in self.active_pattern)
-                    else ("SMALL" if best_pred == "BIG" else "BIG")
-                )
-                return "BET", best_pred, f"Lvl 1: {self.active_pattern} ({max_conf*100:.0f}%)"
-
-        # LEVEL 2: Fortress Quorum (Requires at least 2 Agents consensus)
-        elif level == 2:
-            if len(agreeing_agents) >= 2 and max_conf >= 0.78:
-                self.active_pattern = agreeing_agents[0]
-                self.locked_step2_pred = (
-                    best_pred
-                    if "TREND" in self.active_pattern
-                    else ("SMALL" if best_pred == "BIG" else "BIG")
-                )
-                return "BET", best_pred, f"Lvl 2 Quorum: Consensus ({max_conf*100:.0f}%)"
-
-        # LEVEL 3+: Impervious Multi-Agent Consensus
+        # Tier-1 Pattern (C): Dragon Streak Flow (Streak 4+)
         else:
-            if len(agreeing_agents) >= 2 and max_conf >= 0.90:
-                self.active_pattern = agreeing_agents[0]
-                self.locked_step2_pred = best_pred
-                return "BET", best_pred, f"Lvl 3+ Quorum: Impervious ({max_conf*100:.0f}%)"
+            streak_len = 1
+            for i in range(len(h) - 2, -1, -1):
+                if h[i] == h[-1]:
+                    streak_len += 1
+                else:
+                    break
 
-        return "SKIP", "BIG", f"Quorum Filter Active (Level {level} Lock)"
+            if streak_len >= 4:
+                candidate_p1 = l1
+                candidate_p2 = l1
+                detected_conf = min(0.95, 0.80 + (streak_len * 0.03))
+                pattern_name = "TREND"
+                reason = f"Tier-1: Dragon Streak (Len: {streak_len})"
+
+            # Tier-1 Pattern (D): 1-3 Stick-Sandwich (A-BBB-A -> A, then B)
+            elif l5 != l4 and l4 == l3 and l3 == l2 and l2 != l1:
+                candidate_p1 = l1
+                candidate_p2 = "SMALL" if l1 == "BIG" else "BIG"
+                detected_conf = 0.85
+                pattern_name = "SANDWICH"
+                reason = "Tier-1: 1-3 Stick-Sandwich"
+
+            # Tier-1 Pattern (E): 2-1-2 Symmetrical Sandwich (AA-B-AA -> B, then B)
+            elif l5 == l4 and l4 != l3 and l3 != l2 and l2 == l1:
+                candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+                candidate_p2 = candidate_p1
+                detected_conf = 0.85
+                pattern_name = "SANDWICH"
+                reason = "Tier-1: 2-1-2 Symmetrical Sandwich"
+
+            # Tier-2 Pattern (F): 2-1 Breakout Symmetry
+            elif l4 != l3 and l3 == l2 and l2 != l1:
+                candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+                candidate_p2 = candidate_p1
+                detected_conf = 0.78
+                pattern_name = "PAIR"
+                reason = "Tier-2: 2-1 Breakout Symmetry"
+
+            # Level-1 Only Pattern (G): Dragon 3-Streak
+            elif streak_len == 3:
+                candidate_p1 = l1
+                candidate_p2 = l1
+                detected_conf = 0.76
+                pattern_name = "TREND"
+                reason = "Level-1: Dragon 3-Streak"
+
+            # Level-1 Only Pattern (H): Ping-Pong 3-Step
+            elif l1 != l2 and l2 != l3:
+                candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+                candidate_p2 = l1
+                detected_conf = 0.75
+                pattern_name = "PINGPONG"
+                reason = "Level-1: Ping-Pong 3-Step"
+
+            # Level-1 Only Pattern (I): Early 2-Streak Momentum
+            elif l1 == l2 and l3 == l4 and l2 != l3:
+                candidate_p1 = l1
+                candidate_p2 = l1
+                detected_conf = 0.72
+                pattern_name = "TREND"
+                reason = "Level-1: Early 2-Streak Momentum"
+
+            # Level-1 Only Pattern (J): Micro-Chop Vector
+            elif l1 != l2 and l3 == l2:
+                candidate_p1 = "SMALL" if l1 == "BIG" else "BIG"
+                candidate_p2 = l1
+                detected_conf = 0.68
+                pattern_name = "PINGPONG"
+                reason = "Level-1: Micro-Chop Momentum"
+
+            # Fallback: Dual-Horizon Markov Engine (N >= 3)
+            else:
+                target = tuple(h[-2:])
+                pair_counts = defaultdict(int)
+                search_h = h[:-2]
+                for i in range(len(search_h) - 2):
+                    if tuple(search_h[i : i + 2]) == target:
+                        pair_counts[search_h[i + 2]] += 1
+                if pair_counts:
+                    best = max(pair_counts, key=pair_counts.get)
+                    total = sum(pair_counts.values())
+                    if total >= 3:
+                        conf = pair_counts[best] / total
+                        if conf >= 0.60:
+                            candidate_p1 = best
+                            candidate_p2 = best
+                            detected_conf = conf
+                            pattern_name = "TREND" if best == l1 else "PINGPONG"
+                            reason = f"Fast Markov Trend ({conf*100:.0f}%, N={total})"
+
+        # 🎯 LEVEL 2 STABILITY SHIELD: Level 2 တွင် စျေးကွက် မငြိမ်မချင်း ခေတ္တ စောင့်သည်
+        if level == 2:
+            recent_flips = sum(1 for i in range(len(h) - 4, len(h)) if h[i] != h[i - 1])
+            if recent_flips >= 3:
+                return "SKIP", "BIG", "Level 2: Stability Shield (Waiting Low Variance)"
+
+        # စစ်ဆေးမှု အောင်မြင်ပါက BET Signal ထုတ်ပေးမည်
+        if candidate_p1 and detected_conf >= required_conf:
+            self.active_pattern = pattern_name
+            self.locked_step2_pred = candidate_p2
+            self.step2_reason = f"Step 2: {reason} Closer (WW Lock)"
+            return "BET", candidate_p1, reason
+
+        return "SKIP", "BIG", f"Market Noise (Conf < {required_conf*100:.0f}%)"
 
 
 # ============================================================
-# 4. ADAPTIVE BETTING & STATE MANAGER
+# 4. EXACT UNBOUNDED FIBONACCI STATE MANAGER
 # ============================================================
 class BettingStateManager:
     def __init__(self):
@@ -268,7 +318,7 @@ class BettingStateManager:
                 self.bot_step += 1
                 action = "WIN_STEP1_TO_STEP2"
             else:
-                # 🔥 WIN-WIN HIT! Full Instant Reset to Level 1
+                # 🔥 WIN-WIN HIT! Level 1 သို့ တန်း Reset ဆင်းသည်
                 self.level = 1
                 self.step = 1
                 self.bot_step = 1
@@ -278,6 +328,8 @@ class BettingStateManager:
             profit = -bet_amount
             self.current_profit -= bet_amount
             self.total_losses += 1
+            
+            # 🎯 UNBOUNDED FIBONACCI: ရှုံးပါက Level + 1 အကန့်အသတ်မရှိ တက်မည်
             self.level += 1
             self.step = 1
             self.bot_step += 1
@@ -306,7 +358,7 @@ class BettingStateManager:
 class LiveSignalBot:
     def __init__(self):
         self.lock = threading.Lock()
-        self.engine = SingularityApexEngine()
+        self.engine = SupremeApexPredictorEngine()
         self.betting = BettingStateManager()
         self.last_signal_info: Optional[Dict[str, any]] = None
         self.last_processed_period: Optional[str] = None
@@ -355,7 +407,6 @@ class LiveSignalBot:
             if self.last_signal_info and self.last_signal_info["action"] == "BET":
                 pred = self.last_signal_info["prediction"]
                 is_win = (actual_outcome == pred)
-                self.engine.update_pattern_health(is_win)
                 settle = self.betting.apply_result(is_win)
 
                 if is_win:
@@ -383,15 +434,12 @@ class LiveSignalBot:
                         )
                         self.send_telegram(milestone_msg)
                         self.betting.reset_milestone()
-                else:
-                    # Loss alert is kept silent
-                    pass
 
             # Update Engine with the newly finished round result
             self.engine.add(actual_outcome)
 
             # -------------------------------------------------------------
-            # ၃။ EVALUATE SIGNAL FOR NEXT PERIOD
+            # ၃။ EVALUATE SIGNAL FOR NEXT PERIOD (ဥပမာ ...577 အတွက်)
             # -------------------------------------------------------------
             action, pred, reason = self.engine.evaluate_market(
                 self.betting.level, self.betting.step
@@ -414,6 +462,7 @@ class LiveSignalBot:
                 "reason": reason,
             }
 
+            # 🎯 သင်သတ်မှတ်ပေးထားသော အတိအကျ Signal Message Format
             msg = (
                 f"💖 Period {next_period_str}\n"
                 f"🎯 SIGNAL → <b>{pred.upper()}</b> 🔥\n"
@@ -498,7 +547,7 @@ def index():
         return "Bot is initializing...", 200
     return jsonify({
         "status": "online",
-        "engine": "V35 Singularity Apex Active",
+        "engine": "Supreme Apex 75% Active Signal",
         "current_level": GLOBAL_BOT.betting.level,
         "max_level_reached": GLOBAL_BOT.betting.max_level_reached,
         "total_profit": GLOBAL_BOT.betting.total_profit,
